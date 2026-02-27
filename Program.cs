@@ -3,6 +3,7 @@ using MapaInteractivoBugambilia.Models;
 using MapaInteractivoBugambilia.Services;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
 using System.Text.Json.Serialization;
@@ -40,17 +41,15 @@ using (var scope = app.Services.CreateScope())
     db.Database.Migrate();
 }
 
-app.UseDefaultFiles();
-app.UseStaticFiles();
-
 app.UseAuthentication();
 app.UseAuthorization();
 
-// Proteger /admin/* (excepto login.html)
+// IMPORTANT: protect /admin/* BEFORE static files are served
 app.Use(async (context, next) =>
 {
     var path = context.Request.Path.Value ?? "";
 
+    // allow login page and auth endpoints
     if (path.Equals("/admin/login.html", StringComparison.OrdinalIgnoreCase) ||
         path.StartsWith("/auth/", StringComparison.OrdinalIgnoreCase))
     {
@@ -58,6 +57,7 @@ app.Use(async (context, next) =>
         return;
     }
 
+    // protect everything under /admin
     if (path.StartsWith("/admin/", StringComparison.OrdinalIgnoreCase))
     {
         if (!(context.User?.Identity?.IsAuthenticated ?? false))
@@ -69,6 +69,9 @@ app.Use(async (context, next) =>
 
     await next();
 });
+
+app.UseDefaultFiles();
+app.UseStaticFiles();
 
 // ---------------- PUBLIC API ----------------
 app.MapGet("/api/projects/{projectKey}/lots", async (string projectKey, AppDbContext db) =>
@@ -91,7 +94,6 @@ app.MapGet("/api/updates/stream", async (HttpContext http, UpdateHub hub, Cancel
 
     var reader = hub.Subscribe();
 
-    // send initial version
     await http.Response.WriteAsync($"event: version\ndata: {hub.Version}\n\n", ct);
     await http.Response.Body.FlushAsync(ct);
 
@@ -134,7 +136,7 @@ admin.MapPost("/projects/{projectKey}/import-txt", async (string projectKey, Imp
     }
 
     await db.SaveChangesAsync();
-    hub.Publish(); // notify public
+    hub.Publish();
     return Results.Ok(new { insertedOrUpdated = parsed.Count, version = hub.Version });
 });
 
@@ -153,7 +155,7 @@ admin.MapPut("/projects/{projectKey}/lots/{displayCode}/position", async (
     lot.UpdatedAt = DateTimeOffset.UtcNow;
 
     await db.SaveChangesAsync();
-    hub.Publish(); // notify public
+    hub.Publish();
     return Results.Ok(lot);
 });
 
@@ -174,7 +176,7 @@ admin.MapPut("/projects/{projectKey}/lots/{displayCode}/status", async (
     lot.UpdatedAt = DateTimeOffset.UtcNow;
 
     await db.SaveChangesAsync();
-    hub.Publish(); // notify public
+    hub.Publish();
     return Results.Ok(lot);
 });
 
@@ -210,12 +212,10 @@ public record UpdatePositionDto(decimal X, decimal Y);
 public record UpdateStatusDto(string Status);
 public record ImportTxtDto(string Txt);
 
-// Very small in-memory update hub for SSE
 public sealed class UpdateHub
 {
     private readonly Channel<long> _channel = Channel.CreateUnbounded<long>();
     private long _version = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-
     public long Version => Interlocked.Read(ref _version);
 
     public void Publish()

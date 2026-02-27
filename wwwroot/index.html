@@ -257,15 +257,52 @@
         const imageWidth = 3072;
         const imageHeight = 2304;
 
-        const map = L.map('map', { crs: L.CRS.Simple, minZoom: -3, maxZoom: 4 });
         const bounds = [[0, 0], [imageHeight, imageWidth]];
+
+        // Add a "margin" around the plan so users see padding around it.
+        // Padding is in image coordinate units (pixels of the original image space).
+        const margin = 260;
+        const paddedBounds = [
+            [-margin, -margin],
+            [imageHeight + margin, imageWidth + margin]
+        ];
+
+        const map = L.map('map', {
+            crs: L.CRS.Simple,
+            maxZoom: 4,
+            zoomControl: true,
+            // prevent going to infinity:
+            maxBounds: paddedBounds,
+            maxBoundsViscosity: 1.0,
+            inertia: true
+        });
+
         L.imageOverlay(imageUrl, bounds).addTo(map);
-        map.fitBounds(bounds);
+
+        // Let the user zoom out a bit more than "fit full bounds" so they can see margin.
+        const fitZoom = map.getBoundsZoom(paddedBounds, true);
+        const minZoom = fitZoom - 1;  // allow a little extra zoom-out
+        map.setMinZoom(minZoom);
+
+        // Start at full view with margin
+        map.fitBounds(paddedBounds);
+
+        // Lock panning within padded area
+        map.setMaxBounds(paddedBounds);
+
+        // Remember "home" view to restore after layout changes (toggle list)
+        let homeCenter = map.getCenter();
+        let homeZoom = map.getZoom();
+
+        // When Leaflet finishes initial layout, re-capture home view
+        setTimeout(() => {
+            homeCenter = map.getCenter();
+            homeZoom = map.getZoom();
+        }, 0);
 
         let lotsAll = [];
         let markerLayer = L.layerGroup().addTo(map);
         const lotModal = new bootstrap.Modal(document.getElementById("lotModal"));
-
         let lastVersion = null;
 
         function isMobile() { return window.matchMedia("(max-width: 900px)").matches; }
@@ -294,7 +331,12 @@
             return [py, px];
         }
 
-        function pointRadius() { return isMobile() ? 10 : 7; }
+        function pointRadius() {
+            // Touch-friendly and slightly larger as zoom increases
+            const z = map.getZoom();
+            const base = isMobile() ? 12 : 9;
+            return Math.max(base, base + (z - fitZoom) * 1.2);
+        }
 
         function openLotModal(lot) {
             document.getElementById("lotModalTitle").textContent = `Lote: ${lot.displayCode}`;
@@ -306,24 +348,28 @@
         }
 
         function focusLot(lot) {
-            if (lot.x != null && lot.y != null) map.setView(normToLatLng(lot), Math.max(map.getZoom(), 0));
+            if (lot.x != null && lot.y != null) {
+                // zoom in a bit to see the lot clearly
+                map.setView(normToLatLng(lot), Math.max(map.getZoom(), fitZoom + 1), { animate: true });
+            }
             if (isMobile()) document.getElementById("map").scrollIntoView({ behavior: "smooth", block: "start" });
         }
 
         function renderMarkers(lots) {
             markerLayer.clearLayers();
+
             for (const lot of lots) {
                 if (lot.x == null || lot.y == null) continue;
 
                 const c = L.circleMarker(normToLatLng(lot), {
                     radius: pointRadius(),
-                    weight: 2,
+                    weight: isMobile() ? 3 : 2,
                     color: "#0f1419",
                     fillColor: statusColor(lot.status),
                     fillOpacity: 1
                 });
 
-                c.bindTooltip(lot.displayCode, { direction: "top", offset: [0, -8], opacity: 0.9 });
+                c.bindTooltip(lot.displayCode, { direction: "top", offset: [0, -10], opacity: 0.95 });
 
                 c.on("click", () => { focusLot(lot); openLotModal(lot); });
                 c.addTo(markerLayer);
@@ -365,16 +411,39 @@
             renderAvailableList(filtered);
         });
 
+        // FIX: toggle list without "jumping" to lot area
         document.getElementById("toggleListBtn").addEventListener("click", () => {
             const panel = document.getElementById("listPanel");
             const btn = document.getElementById("toggleListBtn");
             const hidden = panel.classList.toggle("hiddenPanel");
             btn.textContent = hidden ? "Mostrar lotes" : "Ocultar lotes";
+
+            // preserve view (home) instead of jumping
+            // 1) invalidate size so Leaflet recalculates
+            // 2) restore home view (margin view) exactly
+            setTimeout(() => {
+                map.invalidateSize({ pan: false });
+
+                // Ensure we restore the "full plan with margin" view, not the last lot-centered view.
+                map.setView(homeCenter, homeZoom, { animate: false });
+
+                // Re-apply bounds clamp
+                map.setMaxBounds(paddedBounds);
+            }, 0);
         });
 
-        window.addEventListener("resize", () => { renderMarkers(lotsAll); });
+        // Keep markers touchable when zoom changes
+        map.on("zoomend", () => {
+            renderMarkers(lotsAll);
+        });
 
-        // SSE: actualizar al publicar cambios desde el editor
+        // On resize, keep map stable and keep home view updated only if user is currently at home-ish
+        window.addEventListener("resize", () => {
+            map.invalidateSize({ pan: false });
+            renderMarkers(lotsAll);
+        });
+
+        // SSE: update when editor publishes
         function startSse() {
             const es = new EventSource("/api/updates/stream");
 
@@ -384,15 +453,25 @@
                 if (ver === lastVersion) return;
 
                 lastVersion = ver;
-                await loadLots(); // aqui se quitan de la lista los que ya no estén Available
+                await loadLots();
             });
 
             es.onerror = () => {
-                // si se cae, intenta reconectar después
                 setTimeout(startSse, 2000);
                 try { es.close(); } catch { }
             };
         }
+
+        // Capture home view anytime the user returns to "home-ish" (optional)
+        // You can also add a home button later if you want.
+        map.on("moveend", () => {
+            // If user is close to the paddedBounds "home" zoom, update homeCenter/homeZoom.
+            // Keeps toggle behavior aligned to current overall view rather than a lot-focused zoom.
+            if (map.getZoom() <= fitZoom) {
+                homeCenter = map.getCenter();
+                homeZoom = map.getZoom();
+            }
+        });
 
         loadLots();
         startSse();
