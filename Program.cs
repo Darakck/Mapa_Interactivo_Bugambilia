@@ -3,7 +3,6 @@ using MapaInteractivoBugambilia.Models;
 using MapaInteractivoBugambilia.Services;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
-using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
 using System.Text.Json.Serialization;
@@ -14,11 +13,13 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddDbContext<AppDbContext>(opt =>
     opt.UseNpgsql(builder.Configuration.GetConnectionString("Default")));
 
+// Enums como string en JSON (Available/Reserved/Sold...)
 builder.Services.ConfigureHttpJsonOptions(opt =>
 {
     opt.SerializerOptions.Converters.Add(new JsonStringEnumConverter());
 });
 
+// SSE update broadcaster
 builder.Services.AddSingleton<UpdateHub>();
 
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
@@ -35,6 +36,7 @@ builder.Services.AddAuthorization();
 
 var app = builder.Build();
 
+// DB migrate on startup
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -44,7 +46,7 @@ using (var scope = app.Services.CreateScope())
 app.UseAuthentication();
 app.UseAuthorization();
 
-// IMPORTANT: protect /admin/* BEFORE static files are served
+// Protect /admin/* BEFORE static files are served
 app.Use(async (context, next) =>
 {
     var path = context.Request.Path.Value ?? "";
@@ -94,25 +96,132 @@ app.MapGet("/api/updates/stream", async (HttpContext http, UpdateHub hub, Cancel
 
     var reader = hub.Subscribe();
 
-    await http.Response.WriteAsync($"event: version\ndata: {hub.Version}\n\n", ct);
-    await http.Response.Body.FlushAsync(ct);
-
-    await foreach (var ver in reader.ReadAllAsync(ct))
+    try
     {
-        await http.Response.WriteAsync($"event: version\ndata: {ver}\n\n", ct);
+        // initial version
+        await http.Response.WriteAsync($"event: version\ndata: {hub.Version}\n\n", ct);
         await http.Response.Body.FlushAsync(ct);
+
+        await foreach (var ver in reader.ReadAllAsync(ct))
+        {
+            await http.Response.WriteAsync($"event: version\ndata: {ver}\n\n", ct);
+            await http.Response.Body.FlushAsync(ct);
+        }
+    }
+    catch (OperationCanceledException)
+    {
+        // Normal: client disconnected / page refreshed
     }
 });
 
-// ---------------- ADMIN API ----------------
+// ---------------- ADMIN API (requires login) ----------------
 var admin = app.MapGroup("/api/admin").RequireAuthorization();
 
-admin.MapPost("/publish", (UpdateHub hub) =>
+// List ALL lots for editor (includes non-Lot types)
+admin.MapGet("/projects/{projectKey}/lots", async (string projectKey, AppDbContext db) =>
 {
-    hub.Publish();
-    return Results.Ok(new { version = hub.Version });
+    var lots = await db.Lots
+        .AsNoTracking()
+        .Where(x => x.ProjectKey == projectKey)
+        .OrderBy(x => x.Block).ThenBy(x => x.LotNumber)
+        .ToListAsync();
+
+    return Results.Ok(lots);
 });
 
+// Create new lot
+admin.MapPost("/projects/{projectKey}/lots", async (string projectKey, UpsertLotDto dto, AppDbContext db, UpdateHub hub) =>
+{
+    if (string.IsNullOrWhiteSpace(dto.DisplayCode))
+        return Results.BadRequest("DisplayCode is required (e.g. A-2).");
+
+    if (string.IsNullOrWhiteSpace(dto.Block))
+        return Results.BadRequest("Block is required (e.g. A).");
+
+    if (dto.LotNumber <= 0)
+        return Results.BadRequest("LotNumber must be > 0.");
+
+    var code = dto.DisplayCode.Trim();
+
+    var exists = await db.Lots.AnyAsync(x => x.ProjectKey == projectKey && x.DisplayCode == code);
+    if (exists) return Results.Conflict($"Lot '{code}' already exists.");
+
+    var lot = new Lot
+    {
+        ProjectKey = projectKey,
+        DisplayCode = code,
+        Block = dto.Block.Trim(),
+        LotNumber = dto.LotNumber,
+        AreaM2 = dto.AreaM2,
+        AreaV2 = dto.AreaV2,
+        LotType = dto.LotType,
+        Status = dto.Status,
+        X = dto.X,
+        Y = dto.Y,
+        UpdatedAt = DateTimeOffset.UtcNow
+    };
+
+    db.Lots.Add(lot);
+    await db.SaveChangesAsync();
+    hub.Publish();
+
+    return Results.Ok(lot);
+});
+
+// Update whole lot by Id
+admin.MapPut("/projects/{projectKey}/lots/{id:guid}", async (string projectKey, Guid id, UpsertLotDto dto, AppDbContext db, UpdateHub hub) =>
+{
+    var lot = await db.Lots.FirstOrDefaultAsync(x => x.ProjectKey == projectKey && x.Id == id);
+    if (lot is null) return Results.NotFound();
+
+    if (string.IsNullOrWhiteSpace(dto.DisplayCode))
+        return Results.BadRequest("DisplayCode is required (e.g. A-2).");
+
+    if (string.IsNullOrWhiteSpace(dto.Block))
+        return Results.BadRequest("Block is required (e.g. A).");
+
+    if (dto.LotNumber <= 0)
+        return Results.BadRequest("LotNumber must be > 0.");
+
+    var newCode = dto.DisplayCode.Trim();
+
+    if (!string.Equals(lot.DisplayCode, newCode, StringComparison.OrdinalIgnoreCase))
+    {
+        var exists = await db.Lots.AnyAsync(x => x.ProjectKey == projectKey && x.DisplayCode == newCode && x.Id != id);
+        if (exists) return Results.Conflict($"Lot '{newCode}' already exists.");
+        lot.DisplayCode = newCode;
+    }
+
+    lot.Block = dto.Block.Trim();
+    lot.LotNumber = dto.LotNumber;
+    lot.AreaM2 = dto.AreaM2;
+    lot.AreaV2 = dto.AreaV2;
+    lot.LotType = dto.LotType;
+    lot.Status = dto.Status;
+    lot.X = dto.X;
+    lot.Y = dto.Y;
+    lot.UpdatedAt = DateTimeOffset.UtcNow;
+
+    await db.SaveChangesAsync();
+    hub.Publish();
+
+    return Results.Ok(lot);
+});
+
+// Delete lot by Id
+admin.MapDelete("/projects/{projectKey}/lots/{id:guid}", async (string projectKey, Guid id, AppDbContext db, UpdateHub hub) =>
+{
+    var lot = await db.Lots.FirstOrDefaultAsync(x => x.ProjectKey == projectKey && x.Id == id);
+    if (lot is null) return Results.NotFound();
+
+    db.Lots.Remove(lot);
+    await db.SaveChangesAsync();
+    hub.Publish();
+
+    return Results.Ok(new { deleted = true, id });
+});
+
+// Import TXT
 admin.MapPost("/projects/{projectKey}/import-txt", async (string projectKey, ImportTxtDto dto, AppDbContext db, UpdateHub hub) =>
 {
     var parsed = BugambiliaTxtImporter.ParseLots(projectKey, dto.Txt);
@@ -131,53 +240,15 @@ admin.MapPost("/projects/{projectKey}/import-txt", async (string projectKey, Imp
             existing.AreaM2 = lot.AreaM2;
             existing.AreaV2 = lot.AreaV2;
             existing.LotType = lot.LotType;
+            // keep existing.Status / X / Y
             existing.UpdatedAt = DateTimeOffset.UtcNow;
         }
     }
 
     await db.SaveChangesAsync();
     hub.Publish();
+
     return Results.Ok(new { insertedOrUpdated = parsed.Count, version = hub.Version });
-});
-
-admin.MapPut("/projects/{projectKey}/lots/{displayCode}/position", async (
-    string projectKey,
-    string displayCode,
-    UpdatePositionDto dto,
-    AppDbContext db,
-    UpdateHub hub) =>
-{
-    var lot = await db.Lots.FirstOrDefaultAsync(x => x.ProjectKey == projectKey && x.DisplayCode == displayCode);
-    if (lot is null) return Results.NotFound();
-
-    lot.X = dto.X;
-    lot.Y = dto.Y;
-    lot.UpdatedAt = DateTimeOffset.UtcNow;
-
-    await db.SaveChangesAsync();
-    hub.Publish();
-    return Results.Ok(lot);
-});
-
-admin.MapPut("/projects/{projectKey}/lots/{displayCode}/status", async (
-    string projectKey,
-    string displayCode,
-    UpdateStatusDto dto,
-    AppDbContext db,
-    UpdateHub hub) =>
-{
-    var lot = await db.Lots.FirstOrDefaultAsync(x => x.ProjectKey == projectKey && x.DisplayCode == displayCode);
-    if (lot is null) return Results.NotFound();
-
-    if (!Enum.TryParse<LotStatus>(dto.Status, ignoreCase: true, out var parsed))
-        return Results.BadRequest($"Invalid status '{dto.Status}'. Allowed: {string.Join(", ", Enum.GetNames<LotStatus>())}");
-
-    lot.Status = parsed;
-    lot.UpdatedAt = DateTimeOffset.UtcNow;
-
-    await db.SaveChangesAsync();
-    hub.Publish();
-    return Results.Ok(lot);
 });
 
 // ---------------- AUTH ----------------
@@ -208,22 +279,63 @@ app.MapPost("/auth/logout", async (HttpContext http) =>
 
 app.Run();
 
+// ---------------- DTOs ----------------
 public record UpdatePositionDto(decimal X, decimal Y);
 public record UpdateStatusDto(string Status);
 public record ImportTxtDto(string Txt);
 
+public record UpsertLotDto(
+    string DisplayCode,
+    string Block,
+    int LotNumber,
+    decimal? AreaM2,
+    decimal? AreaV2,
+    LotType LotType,
+    LotStatus Status,
+    decimal? X,
+    decimal? Y
+);
+
+// ---------------- SSE Broadcast Hub ----------------
 public sealed class UpdateHub
 {
-    private readonly Channel<long> _channel = Channel.CreateUnbounded<long>();
     private long _version = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
     public long Version => Interlocked.Read(ref _version);
+
+    private readonly object _gate = new();
+    private readonly List<Channel<long>> _subs = new();
 
     public void Publish()
     {
         var next = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         Interlocked.Exchange(ref _version, next);
-        _channel.Writer.TryWrite(next);
+
+        List<Channel<long>> subsSnapshot;
+        lock (_gate)
+        {
+            subsSnapshot = _subs.ToList();
+        }
+
+        foreach (var ch in subsSnapshot)
+        {
+            ch.Writer.TryWrite(next);
+        }
     }
 
-    public ChannelReader<long> Subscribe() => _channel.Reader;
+    public ChannelReader<long> Subscribe()
+    {
+        var ch = Channel.CreateUnbounded<long>(new UnboundedChannelOptions
+        {
+            SingleReader = true,
+            SingleWriter = false,
+            AllowSynchronousContinuations = true
+        });
+
+        lock (_gate)
+        {
+            _subs.Add(ch);
+        }
+
+        return ch.Reader;
+    }
 }

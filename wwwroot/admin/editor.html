@@ -31,9 +31,10 @@
         .content {
             flex: 1;
             display: grid;
-            grid-template-columns: 440px 1fr;
+            grid-template-columns: 480px 1fr;
             gap: 10px;
             padding: 10px;
+            min-height: 0;
         }
 
         .panel {
@@ -41,6 +42,7 @@
             border: 1px solid rgba(255,255,255,.08);
             border-radius: 6px;
             overflow: hidden;
+            min-height: 0;
         }
 
         #map {
@@ -48,13 +50,24 @@
             width: 100%;
             background: #0b0f14;
             min-height: 320px;
+            border-radius: 10px;
+            border: 2px solid rgba(255,255,255,.18);
         }
 
         textarea {
             font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
         }
 
-        /* Responsive */
+        label {
+            font-size: .9rem;
+            color: rgba(255,255,255,.75);
+        }
+
+        .hint {
+            font-size: .8rem;
+            color: rgba(255,255,255,.55);
+        }
+
         @media (max-width: 900px) {
             .content {
                 grid-template-columns: 1fr;
@@ -64,6 +77,13 @@
                 height: 55vh;
             }
         }
+
+        .leaflet-control-zoom a {
+            width: 44px !important;
+            height: 44px !important;
+            line-height: 44px !important;
+            font-size: 22px !important;
+        }
     </style>
 </head>
 <body>
@@ -71,7 +91,7 @@
         <div class="topbar d-flex justify-content-between align-items-center">
             <div>
                 <strong>Editor - Bugambilia</strong>
-                <span class="text-secondary small">Selecciona un lote, cambia estado o haz click en el mapa para guardar posición</span>
+                <span class="text-secondary small">Clic en mapa = guarda X/Y del lote seleccionado</span>
             </div>
             <form method="post" action="/auth/logout" class="m-0">
                 <button class="btn btn-sm btn-outline-light">Salir</button>
@@ -79,42 +99,93 @@
         </div>
 
         <div class="content">
-            <div class="panel p-3">
+            <div class="panel p-3" style="overflow:auto;">
                 <div class="mb-2">
-                    <label class="form-label">Lote seleccionado</label>
+                    <label class="form-label">Seleccionar lote</label>
                     <select id="lotSelect" class="form-select form-select-sm"></select>
-
                     <div class="d-flex gap-2 mt-2 flex-wrap">
-                        <button id="refreshBtn" class="btn btn-sm btn-outline-light">Actualizar lotes</button>
-                        <button id="focusBtn" class="btn btn-sm btn-outline-info">Centrar</button>
-                        <button id="debugBtn" class="btn btn-sm btn-outline-warning">Debug lote</button>
+                        <button id="refreshBtn" class="btn btn-sm btn-outline-light">Actualizar</button>
+                        <button id="newBtn" class="btn btn-sm btn-outline-success">Nuevo</button>
+                        <button id="deleteBtn" class="btn btn-sm btn-outline-danger">Eliminar</button>
                     </div>
+                    <div class="hint mt-1">Eliminar borra el lote de la base de datos.</div>
                 </div>
 
-                <div class="mb-3">
-                    <label class="form-label">Estado</label>
-                    <select id="statusSelect" class="form-select form-select-sm">
-                        <option value="Available">Disponible</option>
-                        <option value="Reserved">Reservado</option>
-                        <option value="Sold">Vendido</option>
-                        <option value="ComingSoon">Próximamente</option>
-                    </select>
-                    <button id="saveStatus" class="btn btn-sm btn-primary mt-2">Guardar estado</button>
-                </div>
+                <hr class="border-secondary" />
+
+                <form id="lotForm">
+                    <input type="hidden" id="lotId">
+
+                    <div class="row g-2">
+                        <div class="col-6">
+                            <label class="form-label">Código (DisplayCode)</label>
+                            <input id="displayCode" class="form-control form-control-sm" placeholder="A-2" required>
+                        </div>
+                        <div class="col-3">
+                            <label class="form-label">Bloque</label>
+                            <input id="block" class="form-control form-control-sm" placeholder="A" required>
+                        </div>
+                        <div class="col-3">
+                            <label class="form-label">No. Lote</label>
+                            <input id="lotNumber" type="number" class="form-control form-control-sm" required>
+                        </div>
+
+                        <div class="col-6">
+                            <label class="form-label">Área m²</label>
+                            <input id="areaM2" type="number" step="0.01" class="form-control form-control-sm">
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label">Varas²</label>
+                            <input id="areaV2" type="number" step="0.01" class="form-control form-control-sm">
+                        </div>
+
+                        <div class="col-6">
+                            <label class="form-label">Tipo</label>
+                            <select id="lotType" class="form-select form-select-sm">
+                                <option value="Lot">Lote</option>
+                                <option value="AreaVerde">Área verde</option>
+                                <option value="Amenity">Amenidad</option>
+                            </select>
+                        </div>
+
+                        <div class="col-6">
+                            <label class="form-label">Estado</label>
+                            <select id="status" class="form-select form-select-sm">
+                                <option value="Available">Disponible</option>
+                                <option value="Reserved">Reservado</option>
+                                <option value="Sold">Vendido</option>
+                                <option value="ComingSoon">Próximamente</option>
+                            </select>
+                        </div>
+
+                        <div class="col-6">
+                            <label class="form-label">X (0..1)</label>
+                            <input id="x" type="number" step="0.000001" class="form-control form-control-sm">
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label">Y (0..1)</label>
+                            <input id="y" type="number" step="0.000001" class="form-control form-control-sm">
+                        </div>
+                    </div>
+
+                    <div class="d-flex gap-2 mt-3 flex-wrap">
+                        <button id="saveBtn" class="btn btn-sm btn-primary">Guardar cambios</button>
+                        <button id="centerBtn" class="btn btn-sm btn-outline-info" type="button">Centrar en mapa</button>
+                    </div>
+
+                    <div id="msg" class="small text-secondary mt-2"></div>
+                </form>
 
                 <hr class="border-secondary" />
 
                 <div class="mb-2">
                     <label class="form-label">Importar TXT</label>
-                    <textarea id="txt" class="form-control form-control-sm" rows="10" placeholder="Pega aquí el contenido completo de Lotes Bugambilia.txt"></textarea>
+                    <textarea id="txt" class="form-control form-control-sm" rows="8" placeholder="Pega aquí el contenido completo de Lotes Bugambilia.txt"></textarea>
                     <button id="importBtn" class="btn btn-sm btn-success mt-2">Importar a Base de Datos</button>
                 </div>
-
-                <div id="msg" class="small text-secondary mt-2"></div>
-                <div id="debug" class="small text-secondary mt-2" style="white-space:pre-wrap;"></div>
             </div>
 
-            <div class="panel">
+            <div class="panel p-2">
                 <div id="map"></div>
             </div>
         </div>
@@ -127,8 +198,8 @@
         const imageWidth = 3072;
         const imageHeight = 2304;
 
-        const map = L.map('map', { crs: L.CRS.Simple, minZoom: -3, maxZoom: 4 });
         const bounds = [[0, 0], [imageHeight, imageWidth]];
+        const map = L.map('map', { crs: L.CRS.Simple, minZoom: -3, maxZoom: 4 });
         L.imageOverlay(imageUrl, bounds).addTo(map);
         map.fitBounds(bounds);
 
@@ -136,10 +207,7 @@
         let markerLayer = L.layerGroup().addTo(map);
 
         const msgEl = document.getElementById("msg");
-        const debugEl = document.getElementById("debug");
-
         function setMsg(t) { msgEl.textContent = t; }
-        function setDebug(obj) { debugEl.textContent = typeof obj === "string" ? obj : JSON.stringify(obj, null, 2); }
 
         function statusColor(status) {
             switch (status) {
@@ -158,91 +226,114 @@
 
         function renderMarkers() {
             markerLayer.clearLayers();
-
             for (const lot of lots) {
                 if (lot.x == null || lot.y == null) continue;
-
                 const c = L.circleMarker(normToLatLng(lot), {
-                    radius: 6,          // tamaño mínimo visible
+                    radius: 7,
                     weight: 2,
                     color: "#0f1419",
                     fillColor: statusColor(lot.status),
                     fillOpacity: 1
                 });
-
-                c.bindTooltip(`${lot.displayCode} (${lot.status})`, { direction: "top", offset: [0, -6], opacity: 0.9 });
-                c.on("click", () => selectLot(lot.displayCode, true));
+                c.bindTooltip(lot.displayCode, { direction: "top", offset: [0, -8], opacity: 0.9 });
+                c.on("click", () => selectLotById(lot.id, true));
                 c.addTo(markerLayer);
             }
         }
 
-        async function fetchJsonNoCache(url) {
-            const res = await fetch(url, { cache: "no-store", headers: { "Cache-Control": "no-cache" } });
-            return res;
-        }
-
         async function loadLots(keepSelection = true) {
-            const res = await fetchJsonNoCache(`/api/projects/${projectKey}/lots`);
-            if (!res.ok) { setMsg(`No se pudieron cargar lotes. HTTP ${res.status}`); return; }
+            const res = await fetch(`/api/admin/projects/${projectKey}/lots`, { cache: "no-store" });
+            if (!res.ok) { setMsg(`Error cargando lotes. HTTP ${res.status}`); return; }
 
             lots = await res.json();
 
             const sel = document.getElementById("lotSelect");
             const current = sel.value;
-
             sel.innerHTML = "";
+
             for (const l of lots) {
                 const opt = document.createElement("option");
-                opt.value = l.displayCode;
-                opt.textContent = `${l.displayCode} (${l.areaM2 ?? ""} m²)`;
+                opt.value = l.id;
+                opt.textContent = l.displayCode;
                 sel.appendChild(opt);
             }
 
             if (keepSelection && current) sel.value = current;
 
-            syncStatusSelect();
+            // fill form with current selection
+            const selectedId = sel.value || (lots[0]?.id ?? "");
+            if (selectedId) selectLotById(selectedId, false);
+
             renderMarkers();
-
-            const withPoint = lots.filter(x => x.x != null && x.y != null).length;
-            setMsg(`Cargados ${lots.length} lotes. Con punto: ${withPoint}`);
+            setMsg(`Cargados: ${lots.length}`);
         }
 
-        function getSelectedLot() {
-            const code = document.getElementById("lotSelect").value;
-            return lots.find(x => x.displayCode === code);
+        function getSelectedId() {
+            return document.getElementById("lotSelect").value;
         }
 
-        function syncStatusSelect() {
-            const lot = getSelectedLot();
+        function selectLotById(id, focus) {
+            const lot = lots.find(x => x.id === id);
             if (!lot) return;
-            document.getElementById("statusSelect").value = lot.status;
-        }
 
-        function selectLot(displayCode, focus) {
-            const sel = document.getElementById("lotSelect");
-            sel.value = displayCode;
-            syncStatusSelect();
+            document.getElementById("lotSelect").value = id;
 
-            if (focus) {
-                const lot = getSelectedLot();
-                if (lot && lot.x != null && lot.y != null) {
-                    map.setView(normToLatLng(lot), Math.max(map.getZoom(), 0));
-                }
+            document.getElementById("lotId").value = lot.id;
+            document.getElementById("displayCode").value = lot.displayCode ?? "";
+            document.getElementById("block").value = lot.block ?? "";
+            document.getElementById("lotNumber").value = lot.lotNumber ?? 0;
+            document.getElementById("areaM2").value = lot.areaM2 ?? "";
+            document.getElementById("areaV2").value = lot.areaV2 ?? "";
+            document.getElementById("lotType").value = lot.lotType ?? "Lot";
+            document.getElementById("status").value = lot.status ?? "Available";
+            document.getElementById("x").value = lot.x ?? "";
+            document.getElementById("y").value = lot.y ?? "";
+
+            if (focus && lot.x != null && lot.y != null) {
+                map.setView(normToLatLng(lot), 0);
             }
         }
 
-        // Click en mapa => guarda posición del lote seleccionado
-        map.on('click', async (e) => {
-            const lot = getSelectedLot();
+        function formToDto() {
+            const toNullableNumber = (v) => {
+                const s = (v ?? "").toString().trim();
+                if (!s) return null;
+                const n = Number(s);
+                return Number.isFinite(n) ? n : null;
+            };
+
+            return {
+                displayCode: document.getElementById("displayCode").value.trim(),
+                block: document.getElementById("block").value.trim(),
+                lotNumber: Number(document.getElementById("lotNumber").value),
+                areaM2: toNullableNumber(document.getElementById("areaM2").value),
+                areaV2: toNullableNumber(document.getElementById("areaV2").value),
+                lotType: document.getElementById("lotType").value,
+                status: document.getElementById("status").value,
+                x: toNullableNumber(document.getElementById("x").value),
+                y: toNullableNumber(document.getElementById("y").value)
+            };
+        }
+
+        // click on map => update X/Y of selected lot (and save via PUT)
+        map.on("click", async (e) => {
+            const id = getSelectedId();
+            const lot = lots.find(x => x.id === id);
             if (!lot) return;
 
             const x = e.latlng.lng / imageWidth;
             const y = e.latlng.lat / imageHeight;
 
-            const res = await fetch(`/api/admin/projects/${projectKey}/lots/${encodeURIComponent(lot.displayCode)}/position`, {
+            // Update form
+            document.getElementById("x").value = x.toFixed(6);
+            document.getElementById("y").value = y.toFixed(6);
+
+            // Save full lot
+            const dto = formToDto();
+            const res = await fetch(`/api/admin/projects/${projectKey}/lots/${encodeURIComponent(id)}`, {
                 method: "PUT",
                 headers: { "Content-Type": "application/json", "Cache-Control": "no-cache" },
-                body: JSON.stringify({ x, y })
+                body: JSON.stringify(dto)
             });
 
             if (!res.ok) {
@@ -251,49 +342,116 @@
                 return;
             }
 
-            const updated = await res.json().catch(() => null);
-            setDebug({ savedPosition: updated });
-
             await loadLots(true);
-            setMsg(`Posición guardada para ${lot.displayCode}`);
+            setMsg(`Posición guardada: ${dto.displayCode}`);
         });
 
         document.getElementById("lotSelect").addEventListener("change", () => {
-            syncStatusSelect();
+            selectLotById(getSelectedId(), false);
         });
 
-        // Guardar estado
-        document.getElementById("saveStatus").addEventListener("click", async (ev) => {
+        document.getElementById("refreshBtn").addEventListener("click", async (ev) => {
             ev.preventDefault();
-            const lot = getSelectedLot();
-            if (!lot) return;
+            await loadLots(true);
+            setMsg("Actualizado.");
+        });
 
-            const status = document.getElementById("statusSelect").value;
+        document.getElementById("centerBtn").addEventListener("click", () => {
+            const id = getSelectedId();
+            const lot = lots.find(x => x.id === id);
+            if (lot && lot.x != null && lot.y != null) map.setView(normToLatLng(lot), 0);
+        });
 
-            const res = await fetch(`/api/admin/projects/${projectKey}/lots/${encodeURIComponent(lot.displayCode)}/status`, {
+        document.getElementById("newBtn").addEventListener("click", async (ev) => {
+            ev.preventDefault();
+
+            // Clear form for new lot
+            document.getElementById("lotId").value = "";
+            document.getElementById("displayCode").value = "";
+            document.getElementById("block").value = "";
+            document.getElementById("lotNumber").value = 0;
+            document.getElementById("areaM2").value = "";
+            document.getElementById("areaV2").value = "";
+            document.getElementById("lotType").value = "Lot";
+            document.getElementById("status").value = "Available";
+            document.getElementById("x").value = "";
+            document.getElementById("y").value = "";
+
+            setMsg("Nuevo lote: llena el formulario y presiona Guardar cambios.");
+        });
+
+        document.getElementById("saveBtn").addEventListener("click", async (ev) => {
+            ev.preventDefault();
+
+            const id = document.getElementById("lotId").value;
+            const dto = formToDto();
+
+            if (!dto.displayCode) { setMsg("DisplayCode es requerido (ej: A-2)."); return; }
+            if (!dto.block) { setMsg("Bloque es requerido (ej: A)."); return; }
+            if (!Number.isFinite(dto.lotNumber) || dto.lotNumber <= 0) { setMsg("No. Lote inválido."); return; }
+
+            // Create
+            if (!id) {
+                const res = await fetch(`/api/admin/projects/${projectKey}/lots`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json", "Cache-Control": "no-cache" },
+                    body: JSON.stringify(dto)
+                });
+
+                if (!res.ok) {
+                    const body = await res.text().catch(() => "");
+                    setMsg(`Error creando lote. HTTP ${res.status}. ${body}`.slice(0, 500));
+                    return;
+                }
+
+                const created = await res.json().catch(() => null);
+                await loadLots(false);
+                if (created?.id) selectLotById(created.id, false);
+
+                setMsg(`Lote creado: ${dto.displayCode}`);
+                return;
+            }
+
+            // Update
+            const res = await fetch(`/api/admin/projects/${projectKey}/lots/${encodeURIComponent(id)}`, {
                 method: "PUT",
                 headers: { "Content-Type": "application/json", "Cache-Control": "no-cache" },
-                body: JSON.stringify({ status })
+                body: JSON.stringify(dto)
             });
 
             if (!res.ok) {
                 const body = await res.text().catch(() => "");
-                setMsg(`Error guardando estado. HTTP ${res.status} ${res.statusText}. ${body}`.slice(0, 500));
+                setMsg(`Error guardando lote. HTTP ${res.status}. ${body}`.slice(0, 500));
                 return;
             }
 
-            // IMPORTANTE: usamos la respuesta del servidor para confirmar qué se guardó
-            const updated = await res.json().catch(() => null);
-            setDebug({ savedStatusResponse: updated });
-
-            // Recargar y redibujar markers (colores)
             await loadLots(true);
-
-            // Mostrar confirmación
-            setMsg(`Servidor guardó: ${updated?.displayCode ?? lot.displayCode} = ${updated?.status ?? status}`);
+            setMsg(`Guardado: ${dto.displayCode}`);
         });
 
-        // Import TXT
+        document.getElementById("deleteBtn").addEventListener("click", async (ev) => {
+            ev.preventDefault();
+            const id = getSelectedId();
+            const lot = lots.find(x => x.id === id);
+            if (!lot) return;
+
+            if (!confirm(`¿Eliminar ${lot.displayCode}? Esta acción no se puede deshacer.`)) return;
+
+            const res = await fetch(`/api/admin/projects/${projectKey}/lots/${encodeURIComponent(id)}`, {
+                method: "DELETE",
+                headers: { "Cache-Control": "no-cache" }
+            });
+
+            if (!res.ok) {
+                const body = await res.text().catch(() => "");
+                setMsg(`Error eliminando lote. HTTP ${res.status}. ${body}`.slice(0, 500));
+                return;
+            }
+
+            await loadLots(false);
+            setMsg(`Eliminado: ${lot.displayCode}`);
+        });
+
         document.getElementById("importBtn").addEventListener("click", async (ev) => {
             ev.preventDefault();
             const txt = document.getElementById("txt").value;
@@ -312,38 +470,8 @@
                 return;
             }
 
-            setDebug({ importResult: data });
             await loadLots(false);
             setMsg(`Importado OK. Procesados: ${data.insertedOrUpdated ?? "?"}`);
-        });
-
-        // Botones
-        document.getElementById("refreshBtn").addEventListener("click", async (ev) => {
-            ev.preventDefault();
-            await loadLots(true);
-            setMsg("Actualizado.");
-        });
-
-        document.getElementById("focusBtn").addEventListener("click", (ev) => {
-            ev.preventDefault();
-            const lot = getSelectedLot();
-            if (lot && lot.x != null && lot.y != null) {
-                map.setView(normToLatLng(lot), Math.max(map.getZoom(), 0));
-            } else {
-                setMsg("Este lote aún no tiene punto guardado.");
-            }
-        });
-
-        // Debug: consulta el lote directamente al admin endpoint (si lo agregaste en Program.cs)
-        document.getElementById("debugBtn").addEventListener("click", async (ev) => {
-            ev.preventDefault();
-            const lot = getSelectedLot();
-            if (!lot) return;
-
-            const res = await fetchJsonNoCache(`/api/admin/projects/${projectKey}/lots/${encodeURIComponent(lot.displayCode)}`);
-            const text = await res.text().catch(() => "");
-            setDebug({ debugEndpointStatus: res.status, body: text });
-            setMsg("Debug listo (abajo).");
         });
 
         loadLots(true);
