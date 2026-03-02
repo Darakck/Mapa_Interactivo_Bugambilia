@@ -1,0 +1,28 @@
+services:
+  db:
+    image: postgres:16
+    container_name: bugambilia_db
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - bugambilia_db_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  app:
+    build: .
+    container_name: bugambilia_app
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT}
+      ConnectionStrings__Default: Host=db;Port=5432;Database=${POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}
+      AdminAuth__Username: ${ADMIN_USER}
+      AdminAuth__Password: ${ADMIN_PASSWORD}
+    depends_on:
+      - db
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:7080:7080"
+
+volumes:
+  bugambilia_db_data:
