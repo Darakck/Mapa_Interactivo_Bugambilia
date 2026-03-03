@@ -13,6 +13,8 @@
         html, body {
             height: 100%;
             margin: 0;
+            background: #0f1419;
+            overscroll-behavior-y: none;
         }
 
         .app {
@@ -53,6 +55,7 @@
                 text-overflow: ellipsis;
             }
 
+        /* Layout: desktop */
         .content {
             flex: 1;
             display: grid;
@@ -61,6 +64,10 @@
             padding: 10px;
             min-height: 0;
         }
+
+            .content.collapsed {
+                grid-template-columns: 0 1fr;
+            }
 
         .panel {
             background: #0f1419;
@@ -79,13 +86,96 @@
             gap: 10px;
         }
 
+        /* LIST PANEL behavior (desktop uses collapse to width=0) */
+        #listPanel {
+            min-width: 0;
+            transition: width 160ms ease, opacity 160ms ease;
+        }
+
+        .content.collapsed #listPanel {
+            width: 0 !important;
+            border: 0;
+            opacity: 0;
+            pointer-events: none;
+        }
+
+            .content.collapsed #listPanel * {
+                overflow: hidden !important;
+            }
+
+        /* MAP AREA */
         #mapWrap {
             height: 100%;
             padding: 10px;
             background: #0b0f14;
             display: flex;
+            flex-direction: column;
+            gap: 10px;
+            min-height: 0;
         }
 
+        /* Legend + tip OUTSIDE map */
+        .legend-bar, .tip-bar {
+            border: 1px solid rgba(255,255,255,.12);
+            border-radius: 14px;
+            padding: 10px 12px;
+            box-shadow: 0 10px 28px rgba(0,0,0,.25);
+        }
+
+        .legend-bar {
+            background: rgba(15,20,25,.88);
+            backdrop-filter: blur(6px);
+        }
+
+        .legend-items {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px 14px;
+            justify-content: flex-start;
+            width: 100%;
+        }
+
+        .legend-item {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font-size: .92rem;
+            color: rgba(230,237,243,.95);
+            white-space: nowrap;
+        }
+
+        .legend-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            border: 1px solid rgba(255,255,255,.18);
+            display: inline-block;
+        }
+
+        .tip-bar {
+            background: rgba(255,255,255,.05);
+            font-size: .92rem;
+            color: rgba(230,237,243,.95);
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+        }
+
+            .tip-bar b {
+                color: #fff;
+            }
+
+        .tip-close {
+            border: 0;
+            background: transparent;
+            color: rgba(230,237,243,.8);
+            font-size: 18px;
+            line-height: 1;
+            padding: 0 6px;
+            cursor: pointer;
+        }
+
+        /* Map fills remaining space */
         #map {
             flex: 1;
             min-height: 320px;
@@ -93,6 +183,7 @@
             border-radius: 12px;
             overflow: hidden;
             background: #0b0f14;
+            width: 100%;
         }
 
         .badge-dot {
@@ -104,15 +195,10 @@
             vertical-align: middle;
         }
 
-        .hiddenPanel {
-            display: none;
-        }
-
         .btn-touch {
             padding: 10px 12px;
         }
 
-        /* Leaflet zoom buttons bigger for touch */
         .leaflet-control-zoom a {
             width: 44px !important;
             height: 44px !important;
@@ -166,18 +252,56 @@
             display: inline-block;
         }
 
-        /* Responsive: en móvil la lista va abajo del mapa */
+        /* -------- MOBILE: maximize map size + remove empty space when list is hidden -------- */
         @media (max-width: 900px) {
             .content {
                 grid-template-columns: 1fr;
             }
 
+                .content.collapsed {
+                    grid-template-columns: 1fr;
+                }
+
+            /* Key: when list is visible, keep it short; when hidden, remove it entirely */
+            #listPanel {
+                transition: max-height 180ms ease, opacity 180ms ease, margin 180ms ease;
+                max-height: 26vh; /* list uses less space */
+            }
+
+                #listPanel .p-2 {
+                    height: calc(26vh - 52px);
+                    overflow: auto;
+                }
+
+            /* When collapsed on mobile, truly hide the list to remove blank space */
+            .content.collapsed #listPanel {
+                max-height: 0 !important;
+                opacity: 0;
+                margin: 0;
+                border: 0;
+                pointer-events: none;
+            }
+
+            /* Give more height to map area */
             #mapWrap {
-                height: 55vh;
+                min-height: 68vh;
             }
 
             #map {
-                min-height: 55vh;
+                min-height: 68vh;
+            }
+
+            .legend-bar, .tip-bar {
+                padding: 9px 10px;
+                border-radius: 14px;
+            }
+
+            .legend-item {
+                font-size: .88rem;
+            }
+
+            .tip-bar {
+                font-size: .88rem;
             }
         }
     </style>
@@ -196,20 +320,33 @@
             </div>
         </div>
 
-        <div class="content">
+        <div id="content" class="content">
             <div id="listPanel" class="panel">
                 <div class="panel-header">
-                    <strong>Disponibles</strong>
+                    <strong>Lotes Disponibles</strong>
                     <span class="text-secondary small" id="availCount">0</span>
                 </div>
-                <div class="p-2" style="height:100%; overflow:auto;">
-                    <input id="search" class="form-control form-control-sm mb-2" placeholder="Buscar (A-1, B-10...)">
+                <div class="p-2">
                     <div id="lotsList" class="list-group list-group-flush"></div>
                 </div>
             </div>
 
             <div class="panel">
                 <div id="mapWrap">
+                    <div class="legend-bar" aria-label="Leyenda">
+                        <div class="legend-items">
+                            <div class="legend-item"><span class="legend-dot" style="background:#22c55e"></span> Disponible</div>
+                            <div class="legend-item"><span class="legend-dot" style="background:#2563eb"></span> Próximamente</div>
+                            <div class="legend-item"><span class="legend-dot" style="background:#dc2626"></span> Reservado</div>
+                            <div class="legend-item"><span class="legend-dot" style="background:#facc15"></span> Vendido</div>
+                        </div>
+                    </div>
+
+                    <div class="tip-bar" id="tipBar">
+                        <div><b>Tip:</b> Dale clic a un punto del mapa para ver más información del lote.</div>
+                        <button class="tip-close" id="tipCloseBtn" aria-label="Cerrar">×</button>
+                    </div>
+
                     <div id="map"></div>
                 </div>
             </div>
@@ -259,9 +396,6 @@
         const imageHeight = 2304;
 
         const bounds = [[0, 0], [imageHeight, imageWidth]];
-
-        // Add a "margin" around the plan so users see padding around it.
-        // Padding is in image coordinate units (pixels of the original image space).
         const margin = 260;
         const paddedBounds = [
             [-margin, -margin],
@@ -272,7 +406,6 @@
             crs: L.CRS.Simple,
             maxZoom: 4,
             zoomControl: true,
-            // prevent going to infinity:
             maxBounds: paddedBounds,
             maxBoundsViscosity: 1.0,
             inertia: true
@@ -280,16 +413,18 @@
 
         L.imageOverlay(imageUrl, bounds).addTo(map);
 
-        // Let the user zoom out a bit more than "fit full bounds" so they can see margin.
         const fitZoom = map.getBoundsZoom(paddedBounds, true);
-        const minZoom = fitZoom - 1;  // allow a little extra zoom-out
-        map.setMinZoom(minZoom);
+        const mobile = window.matchMedia("(max-width: 900px)").matches;
+        const extraZoomOut = mobile ? 2.5 : 1.0;
+        map.setMinZoom(fitZoom - extraZoomOut);
 
-        // Start at full view with margin
         map.fitBounds(paddedBounds);
-
-        // Lock panning within padded area
         map.setMaxBounds(paddedBounds);
+
+        document.getElementById("tipCloseBtn").addEventListener("click", () => {
+            document.getElementById("tipBar").style.display = "none";
+            setTimeout(() => map.invalidateSize(true), 0);
+        });
 
         let lotsAll = [];
         let markerLayer = L.layerGroup().addTo(map);
@@ -299,12 +434,11 @@
         function isMobile() { return window.matchMedia("(max-width: 900px)").matches; }
 
         function statusColor(lot) {
-            // Paleta solicitada
-            const GREEN = "#22c55e";       // Disponible
-            const GREEN_DARK = "#15803d";  // Disponible para Duplex
-            const BLUE = "#2563eb";        // Proximamente
-            const RED = "#dc2626";         // Reserva
-            const YELLOW = "#facc15";      // Vendido
+            const GREEN = "#22c55e";
+            const GREEN_DARK = "#15803d";
+            const BLUE = "#2563eb";
+            const RED = "#dc2626";
+            const YELLOW = "#facc15";
 
             if (!lot) return GREEN;
 
@@ -334,7 +468,6 @@
         }
 
         function pointRadius() {
-            // Touch-friendly and slightly larger as zoom increases
             const z = map.getZoom();
             const base = isMobile() ? 12 : 9;
             return Math.max(base, base + (z - fitZoom) * 1.2);
@@ -351,7 +484,6 @@
 
         function focusLot(lot) {
             if (lot.x != null && lot.y != null) {
-                // zoom in a bit to see the lot clearly
                 map.setView(normToLatLng(lot), Math.max(map.getZoom(), fitZoom + 1), { animate: true });
             }
             if (isMobile()) document.getElementById("map").scrollIntoView({ behavior: "smooth", block: "start" });
@@ -359,7 +491,6 @@
 
         function renderMarkers(lots) {
             markerLayer.clearLayers();
-
             for (const lot of lots) {
                 if (lot.x == null || lot.y == null) continue;
 
@@ -372,7 +503,6 @@
                 });
 
                 c.bindTooltip(lot.displayCode, { direction: "top", offset: [0, -10], opacity: 0.95 });
-
                 c.on("click", () => { focusLot(lot); openLotModal(lot); });
                 c.addTo(markerLayer);
             }
@@ -390,10 +520,10 @@
                 item.style.background = "transparent";
                 item.style.color = "#e6edf3";
                 item.innerHTML = `
-                <div class="d-flex justify-content-between">
-                  <div><span class="badge-dot" style="background:${statusColor(lot)}"></span><strong>${lot.displayCode}</strong></div>
-                  <div class="text-secondary small">${lot.areaM2 ?? ""} m²</div>
-                </div>`;
+                      <div class="d-flex justify-content-between">
+                        <div><span class="badge-dot" style="background:${statusColor(lot)}"></span><strong>${lot.displayCode}</strong></div>
+                        <div class="text-secondary small">${lot.areaM2 ?? ""} m²</div>
+                      </div>`;
 
                 item.onclick = () => { focusLot(lot); openLotModal(lot); };
                 list.appendChild(item);
@@ -407,44 +537,27 @@
             renderMarkers(lotsAll);
         }
 
-        document.getElementById("search").addEventListener("input", (e) => {
-            const q = e.target.value.trim().toLowerCase();
-            const filtered = lotsAll.filter(x => x.displayCode.toLowerCase().includes(q));
-            renderAvailableList(filtered);
-        });
+        function afterLayout(cb) {
+            requestAnimationFrame(() => requestAnimationFrame(cb));
+        }
 
-        // Toggle list while preserving current view (center/zoom)
         document.getElementById("toggleListBtn").addEventListener("click", () => {
-            const panel = document.getElementById("listPanel");
+            const content = document.getElementById("content");
             const btn = document.getElementById("toggleListBtn");
 
-            // preserve current view
-            const currentCenter = map.getCenter();
-            const currentZoom = map.getZoom();
+            const collapsed = content.classList.toggle("collapsed");
+            btn.textContent = collapsed ? "Mostrar lotes" : "Ocultar lotes";
 
-            const hidden = panel.classList.toggle("hiddenPanel");
-            btn.textContent = hidden ? "Mostrar lotes" : "Ocultar lotes";
-
-            // Let the layout settle, then invalidate + restore view
-            requestAnimationFrame(() => {
-                map.invalidateSize({ pan: false });
-                map.setView(currentCenter, currentZoom, { animate: false });
+            afterLayout(() => {
+                map.invalidateSize(true);
+                map.fitBounds(paddedBounds, { animate: false });
                 map.setMaxBounds(paddedBounds);
-                map.panInsideBounds(paddedBounds, { animate: false });
             });
         });
 
-        // Keep markers touchable when zoom changes
-        map.on("zoomend", () => {
-            renderMarkers(lotsAll);
-        });
+        map.on("zoomend", () => renderMarkers(lotsAll));
+        window.addEventListener("resize", () => { map.invalidateSize({ pan: false }); renderMarkers(lotsAll); });
 
-        window.addEventListener("resize", () => {
-            map.invalidateSize({ pan: false });
-            renderMarkers(lotsAll);
-        });
-
-        // SSE: update when editor publishes
         function startSse() {
             const es = new EventSource("/api/updates/stream");
 
