@@ -6,6 +6,10 @@
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>Mapa interactivo - Bugambilia</title>
 
+    <!-- Favicon (logo en la pestaña) -->
+    <link rel="icon" type="image/png" href="/assets/Logo-Bugambilia.png">
+    <link rel="apple-touch-icon" href="/assets/Logo-Bugambilia.png">
+
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 
@@ -48,12 +52,55 @@
                 display: block;
             }
 
+            /* Two-line title: Residencial (line 1) + Bugambilia (line 2) */
             .brand .title {
-                font-weight: 600;
-                white-space: nowrap;
-                overflow: hidden;
-                text-overflow: ellipsis;
+                display: flex;
+                flex-direction: column;
+                line-height: 1.05;
+                min-width: 0;
             }
+
+                .brand .title .t1 {
+                    font-weight: 800;
+                    font-size: 1.05rem;
+                    white-space: nowrap;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                }
+
+                .brand .title .t2 {
+                    font-weight: 700;
+                    font-size: .92rem;
+                    opacity: .92;
+                    white-space: nowrap;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                }
+
+        /* More noticeable toggle button (desktop) */
+        .btn-attention {
+            border: 1px solid rgba(255,255,255,.55) !important;
+            background: rgba(255,255,255,.10) !important;
+            font-weight: 700;
+            letter-spacing: .01em;
+        }
+
+            .btn-attention:hover {
+                background: rgba(255,255,255,.16) !important;
+                border-color: rgba(255,255,255,.70) !important;
+            }
+
+        /* Mobile: make toggle button compact so it doesn't cover title */
+        @media (max-width: 900px) {
+            .btn-attention {
+                padding: 6px 10px !important;
+                font-size: .82rem !important;
+                line-height: 1.05 !important;
+                max-width: 190px;
+                white-space: normal;
+                text-align: center;
+            }
+        }
 
         /* Layout: desktop */
         .content {
@@ -86,9 +133,21 @@
             gap: 10px;
         }
 
-        /* LIST PANEL behavior (desktop uses collapse to width=0) */
+        /* LIST PANEL: restore scrolling on desktop */
         #listPanel {
             min-width: 0;
+            min-height: 0;
+            height: 100%;
+        }
+
+            #listPanel .list-scroll {
+                height: 100%;
+                overflow: auto;
+                -webkit-overflow-scrolling: touch;
+            }
+
+        /* Collapse behavior */
+        #listPanel {
             transition: width 160ms ease, opacity 160ms ease;
         }
 
@@ -252,7 +311,7 @@
             display: inline-block;
         }
 
-        /* -------- MOBILE: maximize map size + remove empty space when list is hidden -------- */
+        /* MOBILE: maximize map size + hide list fully when collapsed */
         @media (max-width: 900px) {
             .content {
                 grid-template-columns: 1fr;
@@ -262,18 +321,15 @@
                     grid-template-columns: 1fr;
                 }
 
-            /* Key: when list is visible, keep it short; when hidden, remove it entirely */
             #listPanel {
                 transition: max-height 180ms ease, opacity 180ms ease, margin 180ms ease;
-                max-height: 26vh; /* list uses less space */
+                max-height: 26vh;
             }
 
-                #listPanel .p-2 {
-                    height: calc(26vh - 52px);
-                    overflow: auto;
+                #listPanel .list-scroll {
+                    max-height: 26vh;
                 }
 
-            /* When collapsed on mobile, truly hide the list to remove blank space */
             .content.collapsed #listPanel {
                 max-height: 0 !important;
                 opacity: 0;
@@ -282,7 +338,6 @@
                 pointer-events: none;
             }
 
-            /* Give more height to map area */
             #mapWrap {
                 min-height: 68vh;
             }
@@ -311,11 +366,14 @@
         <div class="topbar">
             <div class="brand">
                 <img src="/assets/Logo-Bugambilia.png" alt="Logo Bugambilia">
-                <div class="title">Residencial Bugambilia</div>
+                <div class="title">
+                    <div class="t1">Residencial</div>
+                    <div class="t2">Bugambilia</div>
+                </div>
             </div>
 
             <div class="d-flex align-items-center gap-2">
-                <button id="toggleListBtn" class="btn btn-sm btn-outline-light btn-touch">Ocultar lotes</button>
+                <button id="toggleListBtn" class="btn btn-sm btn-outline-light btn-touch btn-attention"></button>
                 <a href="/admin/login.html" class="btn btn-sm btn-outline-secondary btn-touch">Editor</a>
             </div>
         </div>
@@ -326,7 +384,7 @@
                     <strong>Lotes Disponibles</strong>
                     <span class="text-secondary small" id="availCount">0</span>
                 </div>
-                <div class="p-2">
+                <div class="p-2 list-scroll">
                     <div id="lotsList" class="list-group list-group-flush"></div>
                 </div>
             </div>
@@ -415,6 +473,7 @@
 
         const fitZoom = map.getBoundsZoom(paddedBounds, true);
         const mobile = window.matchMedia("(max-width: 900px)").matches;
+
         const extraZoomOut = mobile ? 2.5 : 1.0;
         map.setMinZoom(fitZoom - extraZoomOut);
 
@@ -425,6 +484,27 @@
             document.getElementById("tipBar").style.display = "none";
             setTimeout(() => map.invalidateSize(true), 0);
         });
+
+        // Start with list hidden on mobile
+        const contentEl = document.getElementById("content");
+        const toggleBtn = document.getElementById("toggleListBtn");
+
+        function setToggleText(collapsed) {
+            if (mobile) {
+                toggleBtn.textContent = collapsed ? "Mostrar lista" : "Ocultar lista";
+            } else {
+                toggleBtn.textContent = collapsed
+                    ? "Mostrar Lista de lotes disponibles"
+                    : "Ocultar lista de lotes disponibles";
+            }
+        }
+
+        if (mobile) {
+            contentEl.classList.add("collapsed");
+            setToggleText(true);
+        } else {
+            setToggleText(false);
+        }
 
         let lotsAll = [];
         let markerLayer = L.layerGroup().addTo(map);
@@ -541,12 +621,9 @@
             requestAnimationFrame(() => requestAnimationFrame(cb));
         }
 
-        document.getElementById("toggleListBtn").addEventListener("click", () => {
-            const content = document.getElementById("content");
-            const btn = document.getElementById("toggleListBtn");
-
-            const collapsed = content.classList.toggle("collapsed");
-            btn.textContent = collapsed ? "Mostrar lotes" : "Ocultar lotes";
+        toggleBtn.addEventListener("click", () => {
+            const collapsed = contentEl.classList.toggle("collapsed");
+            setToggleText(collapsed);
 
             afterLayout(() => {
                 map.invalidateSize(true);
@@ -578,6 +655,13 @@
 
         loadLots();
         startSse();
+
+        if (mobile) {
+            setTimeout(() => {
+                map.invalidateSize(true);
+                map.fitBounds(paddedBounds, { animate: false });
+            }, 0);
+        }
     </script>
 </body>
 </html>
