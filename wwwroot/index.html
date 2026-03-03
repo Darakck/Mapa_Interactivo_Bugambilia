@@ -1,4 +1,5 @@
-﻿<!doctype html>
+﻿﻿
+<!doctype html>
 <html lang="es">
 <head>
     <meta charset="utf-8" />
@@ -290,16 +291,6 @@
         // Lock panning within padded area
         map.setMaxBounds(paddedBounds);
 
-        // Remember "home" view to restore after layout changes (toggle list)
-        let homeCenter = map.getCenter();
-        let homeZoom = map.getZoom();
-
-        // When Leaflet finishes initial layout, re-capture home view
-        setTimeout(() => {
-            homeCenter = map.getCenter();
-            homeZoom = map.getZoom();
-        }, 0);
-
         let lotsAll = [];
         let markerLayer = L.layerGroup().addTo(map);
         const lotModal = new bootstrap.Modal(document.getElementById("lotModal"));
@@ -307,12 +298,23 @@
 
         function isMobile() { return window.matchMedia("(max-width: 900px)").matches; }
 
-        function statusColor(status) {
-            switch (status) {
-                case "Reserved": return "#d29922";
-                case "Sold": return "#1f6feb";
-                case "ComingSoon": return "#ff4d8d";
-                default: return "#3fb950";
+        function statusColor(lot) {
+            // Paleta solicitada
+            const GREEN = "#22c55e";       // Disponible
+            const GREEN_DARK = "#15803d";  // Disponible para Duplex
+            const BLUE = "#2563eb";        // Proximamente
+            const RED = "#dc2626";         // Reserva
+            const YELLOW = "#facc15";      // Vendido
+
+            if (!lot) return GREEN;
+
+            switch (lot.status) {
+                case "Reserved": return RED;
+                case "Sold": return YELLOW;
+                case "ComingSoon": return BLUE;
+                case "Available":
+                default:
+                    return (lot.lotType === "Duplex") ? GREEN_DARK : GREEN;
             }
         }
 
@@ -342,7 +344,7 @@
             document.getElementById("lotModalTitle").textContent = `Lote: ${lot.displayCode}`;
             document.getElementById("m2Val").textContent = lot.areaM2 != null ? Number(lot.areaM2).toFixed(2) : "-";
             document.getElementById("v2Val").textContent = lot.areaV2 != null ? Number(lot.areaV2).toFixed(2) : "-";
-            document.getElementById("statusDot").style.background = statusColor(lot.status);
+            document.getElementById("statusDot").style.background = statusColor(lot);
             document.getElementById("statusVal").textContent = statusLabel(lot.status);
             lotModal.show();
         }
@@ -365,7 +367,7 @@
                     radius: pointRadius(),
                     weight: isMobile() ? 3 : 2,
                     color: "#0f1419",
-                    fillColor: statusColor(lot.status),
+                    fillColor: statusColor(lot),
                     fillOpacity: 1
                 });
 
@@ -388,10 +390,10 @@
                 item.style.background = "transparent";
                 item.style.color = "#e6edf3";
                 item.innerHTML = `
-            <div class="d-flex justify-content-between">
-              <div><span class="badge-dot" style="background:${statusColor(lot.status)}"></span><strong>${lot.displayCode}</strong></div>
-              <div class="text-secondary small">${lot.areaM2 ?? ""} m²</div>
-            </div>`;
+                <div class="d-flex justify-content-between">
+                  <div><span class="badge-dot" style="background:${statusColor(lot)}"></span><strong>${lot.displayCode}</strong></div>
+                  <div class="text-secondary small">${lot.areaM2 ?? ""} m²</div>
+                </div>`;
 
                 item.onclick = () => { focusLot(lot); openLotModal(lot); };
                 list.appendChild(item);
@@ -411,25 +413,25 @@
             renderAvailableList(filtered);
         });
 
-        // FIX: toggle list without "jumping" to lot area
+        // Toggle list while preserving current view (center/zoom)
         document.getElementById("toggleListBtn").addEventListener("click", () => {
             const panel = document.getElementById("listPanel");
             const btn = document.getElementById("toggleListBtn");
+
+            // preserve current view
+            const currentCenter = map.getCenter();
+            const currentZoom = map.getZoom();
+
             const hidden = panel.classList.toggle("hiddenPanel");
             btn.textContent = hidden ? "Mostrar lotes" : "Ocultar lotes";
 
-            // preserve view (home) instead of jumping
-            // 1) invalidate size so Leaflet recalculates
-            // 2) restore home view (margin view) exactly
-            setTimeout(() => {
+            // Let the layout settle, then invalidate + restore view
+            requestAnimationFrame(() => {
                 map.invalidateSize({ pan: false });
-
-                // Ensure we restore the "full plan with margin" view, not the last lot-centered view.
-                map.setView(homeCenter, homeZoom, { animate: false });
-
-                // Re-apply bounds clamp
+                map.setView(currentCenter, currentZoom, { animate: false });
                 map.setMaxBounds(paddedBounds);
-            }, 0);
+                map.panInsideBounds(paddedBounds, { animate: false });
+            });
         });
 
         // Keep markers touchable when zoom changes
@@ -437,7 +439,6 @@
             renderMarkers(lotsAll);
         });
 
-        // On resize, keep map stable and keep home view updated only if user is currently at home-ish
         window.addEventListener("resize", () => {
             map.invalidateSize({ pan: false });
             renderMarkers(lotsAll);
@@ -461,17 +462,6 @@
                 try { es.close(); } catch { }
             };
         }
-
-        // Capture home view anytime the user returns to "home-ish" (optional)
-        // You can also add a home button later if you want.
-        map.on("moveend", () => {
-            // If user is close to the paddedBounds "home" zoom, update homeCenter/homeZoom.
-            // Keeps toggle behavior aligned to current overall view rather than a lot-focused zoom.
-            if (map.getZoom() <= fitZoom) {
-                homeCenter = map.getCenter();
-                homeZoom = map.getZoom();
-            }
-        });
 
         loadLots();
         startSse();
