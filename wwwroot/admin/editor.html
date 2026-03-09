@@ -55,10 +55,6 @@
             border: 2px solid rgba(255,255,255,.18);
         }
 
-        textarea {
-            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-        }
-
         label {
             font-size: .9rem;
             color: rgba(255,255,255,.75);
@@ -85,13 +81,40 @@
             line-height: 44px !important;
             font-size: 22px !important;
         }
+
+        /* Locked fields look "disabled" like Visual Studio */
+        .locked input,
+        .locked select,
+        .locked textarea {
+            background-color: #2b3138 !important;
+            color: rgba(230,237,243,.70) !important;
+            border-color: rgba(255,255,255,.12) !important;
+        }
+
+            .locked input:disabled,
+            .locked select:disabled,
+            .locked textarea:disabled {
+                opacity: 1; /* keep VS-like look */
+            }
+
+        /* Status should stay editable and white-ish */
+        .status-editable {
+            background-color: #ffffff !important;
+            color: #111 !important;
+            border-color: rgba(0,0,0,.15) !important;
+        }
+
+        .title-click {
+            cursor: pointer;
+            user-select: none;
+        }
     </style>
 </head>
 <body>
     <div class="app">
         <div class="topbar d-flex justify-content-between align-items-center">
             <div>
-                <strong>Editor - Bugambilia</strong>
+                <strong class="title-click" id="unlockTitle">Editor - Bugambilia</strong>
                 <span class="text-secondary small">Clic en mapa = guarda X/Y del lote seleccionado</span>
             </div>
             <form method="post" action="/auth/logout" class="m-0">
@@ -117,7 +140,7 @@
                 <form id="lotForm">
                     <input type="hidden" id="lotId">
 
-                    <div class="row g-2">
+                    <div class="row g-2 locked" id="lockedFields">
                         <div class="col-6">
                             <label class="form-label">Código (DisplayCode)</label>
                             <input id="displayCode" class="form-control form-control-sm" placeholder="A-2" required>
@@ -152,7 +175,7 @@
 
                         <div class="col-6">
                             <label class="form-label">Estado</label>
-                            <select id="status" class="form-select form-select-sm">
+                            <select id="status" class="form-select form-select-sm status-editable">
                                 <option value="Available">Disponible</option>
                                 <option value="Reserved">Reservado</option>
                                 <option value="Sold">Vendido</option>
@@ -172,6 +195,7 @@
 
                     <div class="d-flex gap-2 mt-3 flex-wrap">
                         <button id="saveBtn" class="btn btn-sm btn-primary">Guardar cambios</button>
+                        <button id="saveStatusBtn" class="btn btn-sm btn-warning" type="button">Guardar estado</button>
                         <button id="centerBtn" class="btn btn-sm btn-outline-info" type="button">Centrar en mapa</button>
                     </div>
 
@@ -180,7 +204,7 @@
 
                 <hr class="border-secondary" />
 
-                <div class="mb-2">
+                <div class="mb-2 locked" id="lockedImport">
                     <label class="form-label">Importar TXT</label>
                     <textarea id="txt" class="form-control form-control-sm" rows="8" placeholder="Pega aquí el contenido completo de Lotes Bugambilia.txt"></textarea>
                     <button id="importBtn" class="btn btn-sm btn-success mt-2">Importar a Base de Datos</button>
@@ -193,7 +217,32 @@
         </div>
     </div>
 
+    <!-- Unlock Modal -->
+    <div class="modal fade" id="unlockModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content bg-dark text-light border-secondary">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title">Desbloquear edición avanzada</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="small text-secondary mb-2">
+                        Solo tú tienes este código. Si lo ingresas, podrás modificar posición, medidas, nombre, etc.
+                    </div>
+                    <label class="form-label">Código</label>
+                    <input id="unlockCode" inputmode="numeric" class="form-control" placeholder="*************">
+                    <div id="unlockMsg" class="small text-secondary mt-2"></div>
+                </div>
+                <div class="modal-footer border-secondary">
+                    <button type="button" class="btn btn-outline-light" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="button" class="btn btn-primary" id="unlockBtn">Desbloquear</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         const projectKey = "bugambilia";
         const imageUrl = "/assets/bugambilia-plan.png";
@@ -210,6 +259,44 @@
 
         const msgEl = document.getElementById("msg");
         function setMsg(t) { msgEl.textContent = t; }
+
+        // Unlock state
+        let fullAccess = false;
+
+        const unlockModal = new bootstrap.Modal(document.getElementById("unlockModal"));
+        const unlockMsg = document.getElementById("unlockMsg");
+
+        function setUnlockedUi(isUnlocked) {
+            fullAccess = isUnlocked;
+
+            // disable/enable all inputs except status
+            const lockedContainer = document.getElementById("lockedFields");
+            const inputs = lockedContainer.querySelectorAll("input, select");
+            for (const el of inputs) {
+                if (el.id === "status") continue;
+                el.disabled = !isUnlocked;
+            }
+
+            // import section
+            const importBox = document.getElementById("lockedImport");
+            const importInputs = importBox.querySelectorAll("textarea, button");
+            for (const el of importInputs) el.disabled = !isUnlocked;
+
+            // buttons
+            document.getElementById("newBtn").disabled = !isUnlocked;
+            document.getElementById("deleteBtn").disabled = !isUnlocked;
+            document.getElementById("saveBtn").disabled = !isUnlocked;
+
+            // center is safe
+            document.getElementById("centerBtn").disabled = false;
+
+            // status save is always enabled
+            document.getElementById("saveStatusBtn").disabled = false;
+
+            setMsg(isUnlocked
+                ? "Edición avanzada ACTIVADA."
+                : "Modo seguro: solo puedes cambiar el ESTADO. (Para edición avanzada: toca el título 'Editor - Bugambilia')");
+        }
 
         function statusColor(lot) {
             const GREEN = "#22c55e";
@@ -326,35 +413,57 @@
             };
         }
 
-        // click on map => update X/Y of selected lot (and save via PUT)
-        map.on("click", async (e) => {
-            const id = getSelectedId();
-            const lot = lots.find(x => x.id === id);
-            if (!lot) return;
+        // Clicking the title opens unlock modal (hidden "button")
+        document.getElementById("unlockTitle").addEventListener("click", () => {
+            unlockMsg.textContent = "";
+            document.getElementById("unlockCode").value = "";
+            unlockModal.show();
+            setTimeout(() => document.getElementById("unlockCode").focus(), 200);
+        });
 
-            const x = e.latlng.lng / imageWidth;
-            const y = e.latlng.lat / imageHeight;
+        // Unlock action
+        document.getElementById("unlockBtn").addEventListener("click", async () => {
+            const code = document.getElementById("unlockCode").value.trim();
+            unlockMsg.textContent = "Verificando...";
 
-            // Update form
-            document.getElementById("x").value = x.toFixed(6);
-            document.getElementById("y").value = y.toFixed(6);
-
-            // Save full lot
-            const dto = formToDto();
-            const res = await fetch(`/api/admin/projects/${projectKey}/lots/${encodeURIComponent(id)}`, {
-                method: "PUT",
+            const res = await fetch("/auth/unlock", {
+                method: "POST",
                 headers: { "Content-Type": "application/json", "Cache-Control": "no-cache" },
-                body: JSON.stringify(dto)
+                body: JSON.stringify({ code })
+            });
+
+            if (!res.ok) {
+                unlockMsg.textContent = "Código incorrecto o no autorizado.";
+                return;
+            }
+
+            unlockMsg.textContent = "Listo. Edición avanzada activada.";
+            setUnlockedUi(true);
+
+            setTimeout(() => unlockModal.hide(), 500);
+        });
+
+        // Save STATUS only (always allowed)
+        document.getElementById("saveStatusBtn").addEventListener("click", async () => {
+            const id = getSelectedId();
+            if (!id) { setMsg("Selecciona un lote."); return; }
+
+            const status = document.getElementById("status").value;
+
+            const res = await fetch(`/api/admin/projects/${projectKey}/lots/${encodeURIComponent(id)}/status`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json", "Cache-Control": "no-cache" },
+                body: JSON.stringify({ status })
             });
 
             if (!res.ok) {
                 const body = await res.text().catch(() => "");
-                setMsg(`Error guardando posición. HTTP ${res.status}. ${body}`.slice(0, 500));
+                setMsg(`Error guardando estado. HTTP ${res.status}. ${body}`.slice(0, 500));
                 return;
             }
 
             await loadLots(true);
-            setMsg(`Posición guardada: ${dto.displayCode}`);
+            setMsg("Estado guardado.");
         });
 
         document.getElementById("lotSelect").addEventListener("change", () => {
@@ -373,10 +482,17 @@
             if (lot && lot.x != null && lot.y != null) map.setView(normToLatLng(lot), 0);
         });
 
+        // Block full-edit actions unless unlocked
+        function requireUnlock() {
+            if (fullAccess) return true;
+            setMsg("Acción bloqueada. Para edición avanzada toca el título 'Editor - Bugambilia' e ingresa tu código.");
+            return false;
+        }
+
         document.getElementById("newBtn").addEventListener("click", async (ev) => {
             ev.preventDefault();
+            if (!requireUnlock()) return;
 
-            // Clear form for new lot
             document.getElementById("lotId").value = "";
             document.getElementById("displayCode").value = "";
             document.getElementById("block").value = "";
@@ -393,6 +509,7 @@
 
         document.getElementById("saveBtn").addEventListener("click", async (ev) => {
             ev.preventDefault();
+            if (!requireUnlock()) return;
 
             const id = document.getElementById("lotId").value;
             const dto = formToDto();
@@ -442,6 +559,8 @@
 
         document.getElementById("deleteBtn").addEventListener("click", async (ev) => {
             ev.preventDefault();
+            if (!requireUnlock()) return;
+
             const id = getSelectedId();
             const lot = lots.find(x => x.id === id);
             if (!lot) return;
@@ -465,6 +584,8 @@
 
         document.getElementById("importBtn").addEventListener("click", async (ev) => {
             ev.preventDefault();
+            if (!requireUnlock()) return;
+
             const txt = document.getElementById("txt").value;
             if (!txt.trim()) { setMsg("Pega el TXT primero."); return; }
 
@@ -485,6 +606,39 @@
             setMsg(`Importado OK. Procesados: ${data.insertedOrUpdated ?? "?"}`);
         });
 
+        // click on map => update X/Y (ONLY if unlocked)
+        map.on("click", async (e) => {
+            if (!fullAccess) return;
+
+            const id = getSelectedId();
+            const lot = lots.find(x => x.id === id);
+            if (!lot) return;
+
+            const x = e.latlng.lng / imageWidth;
+            const y = e.latlng.lat / imageHeight;
+
+            document.getElementById("x").value = x.toFixed(6);
+            document.getElementById("y").value = y.toFixed(6);
+
+            const dto = formToDto();
+            const res = await fetch(`/api/admin/projects/${projectKey}/lots/${encodeURIComponent(id)}`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json", "Cache-Control": "no-cache" },
+                body: JSON.stringify(dto)
+            });
+
+            if (!res.ok) {
+                const body = await res.text().catch(() => "");
+                setMsg(`Error guardando posición. HTTP ${res.status}. ${body}`.slice(0, 500));
+                return;
+            }
+
+            await loadLots(true);
+            setMsg(`Posición guardada: ${dto.displayCode}`);
+        });
+
+        // Init: locked mode
+        setUnlockedUi(false);
         loadLots(true);
     </script>
 </body>

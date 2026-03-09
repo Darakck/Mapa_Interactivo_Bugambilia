@@ -3,6 +3,7 @@ using MapaInteractivoBugambilia.Models;
 using MapaInteractivoBugambilia.Services;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
 using System.Text.Json.Serialization;
@@ -32,7 +33,15 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
         opt.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
     });
 
-builder.Services.AddAuthorization();
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy("AdminLoggedIn", policy => policy.RequireAuthenticatedUser());
+
+    // Only when admin has entered secret unlock code in this session
+    options.AddPolicy("FullAdminUnlocked", policy =>
+        policy.RequireAuthenticatedUser()
+              .RequireClaim("FullAccess", "true"));
+});
 
 var app = builder.Build();
 
@@ -115,7 +124,7 @@ app.MapGet("/api/updates/stream", async (HttpContext http, UpdateHub hub, Cancel
 });
 
 // ---------------- ADMIN API (requires login) ----------------
-var admin = app.MapGroup("/api/admin").RequireAuthorization();
+var admin = app.MapGroup("/api/admin").RequireAuthorization("AdminLoggedIn");
 
 // List ALL lots for editor (includes non-Lot types)
 admin.MapGet("/projects/{projectKey}/lots", async (string projectKey, AppDbContext db) =>
@@ -129,8 +138,30 @@ admin.MapGet("/projects/{projectKey}/lots", async (string projectKey, AppDbConte
     return Results.Ok(lots);
 });
 
-// Create new lot
-admin.MapPost("/projects/{projectKey}/lots", async (string projectKey, UpsertLotDto dto, AppDbContext db, UpdateHub hub) =>
+// ---- STATUS ONLY (allowed without unlock) ----
+admin.MapPatch("/projects/{projectKey}/lots/{id:guid}/status",
+    async (string projectKey, Guid id, UpdateStatusDto dto, AppDbContext db, UpdateHub hub) =>
+    {
+        if (!Enum.TryParse<LotStatus>(dto.Status, ignoreCase: true, out var status))
+            return Results.BadRequest("Invalid status.");
+
+        var lot = await db.Lots.FirstOrDefaultAsync(x => x.ProjectKey == projectKey && x.Id == id);
+        if (lot is null) return Results.NotFound();
+
+        lot.Status = status;
+        lot.UpdatedAt = DateTimeOffset.UtcNow;
+
+        await db.SaveChangesAsync();
+        hub.Publish();
+
+        return Results.Ok(lot);
+    });
+
+// ---------------- UNLOCKED (full edit) endpoints ----------------
+var unlocked = admin.MapGroup("").RequireAuthorization("FullAdminUnlocked");
+
+// Create lot
+unlocked.MapPost("/projects/{projectKey}/lots", async (string projectKey, UpsertLotDto dto, AppDbContext db, UpdateHub hub) =>
 {
     if (string.IsNullOrWhiteSpace(dto.DisplayCode))
         return Results.BadRequest("DisplayCode is required (e.g. A-2).");
@@ -168,8 +199,8 @@ admin.MapPost("/projects/{projectKey}/lots", async (string projectKey, UpsertLot
     return Results.Ok(lot);
 });
 
-// Update whole lot by Id
-admin.MapPut("/projects/{projectKey}/lots/{id:guid}", async (string projectKey, Guid id, UpsertLotDto dto, AppDbContext db, UpdateHub hub) =>
+// Update whole lot by Id (full edit)
+unlocked.MapPut("/projects/{projectKey}/lots/{id:guid}", async (string projectKey, Guid id, UpsertLotDto dto, AppDbContext db, UpdateHub hub) =>
 {
     var lot = await db.Lots.FirstOrDefaultAsync(x => x.ProjectKey == projectKey && x.Id == id);
     if (lot is null) return Results.NotFound();
@@ -209,7 +240,7 @@ admin.MapPut("/projects/{projectKey}/lots/{id:guid}", async (string projectKey, 
 });
 
 // Delete lot by Id
-admin.MapDelete("/projects/{projectKey}/lots/{id:guid}", async (string projectKey, Guid id, AppDbContext db, UpdateHub hub) =>
+unlocked.MapDelete("/projects/{projectKey}/lots/{id:guid}", async (string projectKey, Guid id, AppDbContext db, UpdateHub hub) =>
 {
     var lot = await db.Lots.FirstOrDefaultAsync(x => x.ProjectKey == projectKey && x.Id == id);
     if (lot is null) return Results.NotFound();
@@ -222,7 +253,7 @@ admin.MapDelete("/projects/{projectKey}/lots/{id:guid}", async (string projectKe
 });
 
 // Import TXT
-admin.MapPost("/projects/{projectKey}/import-txt", async (string projectKey, ImportTxtDto dto, AppDbContext db, UpdateHub hub) =>
+unlocked.MapPost("/projects/{projectKey}/import-txt", async (string projectKey, ImportTxtDto dto, AppDbContext db, UpdateHub hub) =>
 {
     var parsed = BugambiliaTxtImporter.ParseLots(projectKey, dto.Txt);
 
@@ -264,11 +295,39 @@ app.MapPost("/auth/login", async (HttpContext http) =>
     if (username != adminUser || password != adminPass)
         return Results.Unauthorized();
 
+    // login does NOT grant FullAccess
     var claims = new List<Claim> { new Claim(ClaimTypes.Name, username) };
     var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
 
     await http.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, new ClaimsPrincipal(identity));
     return Results.Redirect("/admin/editor.html");
+});
+
+// Unlock endpoint (adds FullAccess claim to cookie)
+app.MapPost("/auth/unlock", async (HttpContext http) =>
+{
+    if (!(http.User?.Identity?.IsAuthenticated ?? false))
+        return Results.Unauthorized();
+
+    var dto = await http.Request.ReadFromJsonAsync<UnlockDto>();
+    if (dto is null || string.IsNullOrWhiteSpace(dto.Code))
+        return Results.BadRequest("Code is required.");
+
+    var unlockCode = builder.Configuration["AdminAuth:UnlockCode"] ?? "";
+    if (!string.Equals(dto.Code.Trim(), unlockCode, StringComparison.Ordinal))
+        return Results.Unauthorized();
+
+    var username = http.User.Identity?.Name ?? "admin";
+    var claims = new List<Claim>
+    {
+        new Claim(ClaimTypes.Name, username),
+        new Claim("FullAccess", "true")
+    };
+
+    var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
+    await http.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, new ClaimsPrincipal(identity));
+
+    return Results.Ok(new { unlocked = true });
 });
 
 app.MapPost("/auth/logout", async (HttpContext http) =>
@@ -283,6 +342,7 @@ app.Run();
 public record UpdatePositionDto(decimal X, decimal Y);
 public record UpdateStatusDto(string Status);
 public record ImportTxtDto(string Txt);
+public record UnlockDto(string Code);
 
 public record UpsertLotDto(
     string DisplayCode,
