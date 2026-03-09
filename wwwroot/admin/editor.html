@@ -82,22 +82,22 @@
             font-size: 22px !important;
         }
 
-        /* Locked fields look "disabled" like Visual Studio */
+        /* IMPORTANT: remove the gray "locked" look completely */
         .locked input,
         .locked select,
         .locked textarea {
-            background-color: #2b3138 !important;
-            color: rgba(230,237,243,.70) !important;
-            border-color: rgba(255,255,255,.12) !important;
+            background-color: #ffffff !important;
+            color: #111 !important;
+            border-color: rgba(0,0,0,.15) !important;
         }
 
             .locked input:disabled,
             .locked select:disabled,
             .locked textarea:disabled {
-                opacity: 1; /* keep VS-like look */
+                opacity: 1 !important;
             }
 
-        /* Status should stay editable and white-ish */
+        /* Status keep normal */
         .status-editable {
             background-color: #ffffff !important;
             color: #111 !important;
@@ -260,7 +260,6 @@
         const msgEl = document.getElementById("msg");
         function setMsg(t) { msgEl.textContent = t; }
 
-        // Unlock state
         let fullAccess = false;
 
         const unlockModal = new bootstrap.Modal(document.getElementById("unlockModal"));
@@ -269,7 +268,7 @@
         function setUnlockedUi(isUnlocked) {
             fullAccess = isUnlocked;
 
-            // disable/enable all inputs except status
+            // keep disabled behavior, just no gray visuals (CSS override above)
             const lockedContainer = document.getElementById("lockedFields");
             const inputs = lockedContainer.querySelectorAll("input, select");
             for (const el of inputs) {
@@ -277,20 +276,15 @@
                 el.disabled = !isUnlocked;
             }
 
-            // import section
             const importBox = document.getElementById("lockedImport");
             const importInputs = importBox.querySelectorAll("textarea, button");
             for (const el of importInputs) el.disabled = !isUnlocked;
 
-            // buttons
             document.getElementById("newBtn").disabled = !isUnlocked;
             document.getElementById("deleteBtn").disabled = !isUnlocked;
             document.getElementById("saveBtn").disabled = !isUnlocked;
 
-            // center is safe
             document.getElementById("centerBtn").disabled = false;
-
-            // status save is always enabled
             document.getElementById("saveStatusBtn").disabled = false;
 
             setMsg(isUnlocked
@@ -413,7 +407,6 @@
             };
         }
 
-        // Clicking the title opens unlock modal (hidden "button")
         document.getElementById("unlockTitle").addEventListener("click", () => {
             unlockMsg.textContent = "";
             document.getElementById("unlockCode").value = "";
@@ -421,7 +414,6 @@
             setTimeout(() => document.getElementById("unlockCode").focus(), 200);
         });
 
-        // Unlock action
         document.getElementById("unlockBtn").addEventListener("click", async () => {
             const code = document.getElementById("unlockCode").value.trim();
             unlockMsg.textContent = "Verificando...";
@@ -439,11 +431,9 @@
 
             unlockMsg.textContent = "Listo. Edición avanzada activada.";
             setUnlockedUi(true);
-
             setTimeout(() => unlockModal.hide(), 500);
         });
 
-        // Save STATUS only (always allowed)
         document.getElementById("saveStatusBtn").addEventListener("click", async () => {
             const id = getSelectedId();
             if (!id) { setMsg("Selecciona un lote."); return; }
@@ -482,7 +472,6 @@
             if (lot && lot.x != null && lot.y != null) map.setView(normToLatLng(lot), 0);
         });
 
-        // Block full-edit actions unless unlocked
         function requireUnlock() {
             if (fullAccess) return true;
             setMsg("Acción bloqueada. Para edición avanzada toca el título 'Editor - Bugambilia' e ingresa tu código.");
@@ -518,7 +507,6 @@
             if (!dto.block) { setMsg("Bloque es requerido (ej: A)."); return; }
             if (!Number.isFinite(dto.lotNumber) || dto.lotNumber <= 0) { setMsg("No. Lote inválido."); return; }
 
-            // Create
             if (!id) {
                 const res = await fetch(`/api/admin/projects/${projectKey}/lots`, {
                     method: "POST",
@@ -540,7 +528,6 @@
                 return;
             }
 
-            // Update
             const res = await fetch(`/api/admin/projects/${projectKey}/lots/${encodeURIComponent(id)}`, {
                 method: "PUT",
                 headers: { "Content-Type": "application/json", "Cache-Control": "no-cache" },
@@ -606,7 +593,6 @@
             setMsg(`Importado OK. Procesados: ${data.insertedOrUpdated ?? "?"}`);
         });
 
-        // click on map => update X/Y (ONLY if unlocked)
         map.on("click", async (e) => {
             if (!fullAccess) return;
 
@@ -637,7 +623,6 @@
             setMsg(`Posición guardada: ${dto.displayCode}`);
         });
 
-        // Init: locked mode
         setUnlockedUi(false);
         loadLots(true);
     </script>

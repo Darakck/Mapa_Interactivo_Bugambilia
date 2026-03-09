@@ -6,14 +6,14 @@
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>Mapa interactivo - Bugambilia</title>
 
-    <!-- Favicon -->
     <link rel="icon" type="image/png" href="/assets/Logo-Bugambilia.png">
     <link rel="apple-touch-icon" href="/assets/Logo-Bugambilia.png">
 
-    <!-- Preload: plano (mejora muchísimo la percepción de carga) -->
-    <!-- IMPORTANTE: Ajusta la ruta a la que de verdad exista en tu /assets -->
-    <link rel="preload" as="image" href="/assets/bugambilia-plan.webp">
-    <link rel="preload" as="image" href="/assets/bugambilia-plan-mobile.webp" media="(max-width: 900px)">
+    <!-- IMPORTANTE:
+         - Solo pre-cargamos el plano que de verdad usamos (NO el mobile si no existe)
+         - Si NO tienes /assets/bugambilia-plan-mobile.webp, NO lo pongas aquí.
+    -->
+    <link rel="preload" as="image" href="/assets/bugambilia-plan.webp" type="image/webp">
 
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
@@ -138,6 +138,7 @@
             min-width: 0;
             min-height: 0;
             height: 100%;
+            transition: width 160ms ease, opacity 160ms ease;
         }
 
             #listPanel .list-scroll {
@@ -145,10 +146,6 @@
                 overflow: auto;
                 -webkit-overflow-scrolling: touch;
             }
-
-        #listPanel {
-            transition: width 160ms ease, opacity 160ms ease;
-        }
 
         .content.collapsed #listPanel {
             width: 0 !important;
@@ -231,7 +228,6 @@
             cursor: pointer;
         }
 
-        /* Map */
         #map {
             flex: 1;
             min-height: 320px;
@@ -243,7 +239,6 @@
             position: relative;
         }
 
-        /* Placeholder while image is loading (no layout shift) */
         .map-loading {
             position: absolute;
             inset: 0;
@@ -255,6 +250,8 @@
             letter-spacing: .02em;
             pointer-events: none;
             z-index: 400;
+            text-align: center;
+            padding: 18px;
         }
 
         .badge-dot {
@@ -277,7 +274,52 @@
             font-size: 22px !important;
         }
 
-        /* Mobile sizing */
+        /* Modal dark */
+        .modal-content.dark {
+            background: #2f3945;
+            color: #e6edf3;
+            border: 1px solid rgba(255,255,255,.12);
+        }
+
+        .modal-header.dark, .modal-footer.dark {
+            border-color: rgba(255,255,255,.12);
+        }
+
+        .modal-body .box {
+            border: 1px solid rgba(255,255,255,.18);
+            border-radius: 8px;
+            padding: 14px;
+            background: rgba(0,0,0,.12);
+        }
+
+        .kv {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+            .kv b {
+                color: #fff;
+            }
+
+        .status-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 10px;
+            border-radius: 999px;
+            border: 1px solid rgba(255,255,255,.18);
+            background: rgba(0,0,0,.12);
+            font-size: 0.95rem;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+
         @media (max-width: 900px) {
             .content {
                 grid-template-columns: 1fr;
@@ -379,37 +421,62 @@
         </div>
     </div>
 
+    <!-- Modal -->
+    <div class="modal fade" id="lotModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+            <div class="modal-content dark">
+                <div class="modal-header dark">
+                    <h5 class="modal-title" id="lotModalTitle">Lote</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="box">
+                        <div class="mb-2 text-uppercase" style="font-size:0.85rem; opacity:.85;">Características del Lote</div>
+                        <div class="kv mb-3">
+                            <div>Área m²: <b id="m2Val">-</b></div>
+                            <div>Varas²: <b id="v2Val">-</b></div>
+                        </div>
+                        <div class="mb-2">
+                            <span class="status-pill">
+                                <span class="status-dot" id="statusDot"></span>
+                                <span>Estado:</span>
+                                <b id="statusVal">-</b>
+                            </span>
+                        </div>
+                        <div class="mt-3 small text-secondary">
+                            Tip: En móvil, toca un lote y el mapa subirá automáticamente.
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer dark">
+                    <button type="button" class="btn btn-outline-light btn-touch" data-bs-dismiss="modal">Cerrar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 
     <script>
-        // ---- Project config ----
         const projectKey = "bugambilia";
 
-        // Tamaño lógico (para bounds y coordenadas; NO lo cambies aunque uses imagen más pequeña)
+        // tamaño lógico (no cambiar)
         const imageWidth = 3072;
         const imageHeight = 2304;
 
-        // Selección de imagen optimizada (móvil vs desktop)
-        // IMPORTANTE: crea estos archivos en /wwwroot/assets
-        // - /assets/bugambilia-plan.webp
-        // - /assets/bugambilia-plan-mobile.webp  (más liviana)
-        const mobile = window.matchMedia("(max-width: 900px)").matches;
-        const imageUrl = mobile
-            ? "/assets/bugambilia-plan-mobile.webp"
-            : "/assets/bugambilia-plan.webp";
+        // NO existe plano mobile -> usamos siempre el mismo
+        const imageUrl = "/assets/bugambilia-plan.webp";
+        const fallbackUrl = "/assets/bugambilia-plan.png";
 
-        // Bounds base (coordenadas lógicas)
         const bounds = [[0, 0], [imageHeight, imageWidth]];
 
-        // Margen (controla cuánto se pueden ir)
         const margin = 260;
         const paddedBounds = [
             [-margin, -margin],
             [imageHeight + margin, imageWidth + margin]
         ];
 
-        // ---- Map init ----
         const map = L.map('map', {
             crs: L.CRS.Simple,
             maxZoom: 4,
@@ -419,60 +486,14 @@
             inertia: true
         });
 
-        // Preload image manually so we can hide loader exactly when it finishes
-        const img = new Image();
-        img.decoding = "async";
-        img.loading = "eager";
-        img.src = imageUrl;
+        let fitZoom = 0;
 
         const mapLoading = document.getElementById("mapLoading");
+        function hideMapLoader() { mapLoading.style.display = "none"; }
 
-        function hideMapLoader() {
-            mapLoading.style.display = "none";
-        }
-
-        img.onload = () => {
-            // Add overlay after image is ready (fewer gray flashes / perceived faster)
-            const overlay = L.imageOverlay(imageUrl, bounds).addTo(map);
-
-            // Calculate fit zoom for padded bounds
-            const fitZoom = map.getBoundsZoom(paddedBounds, true);
-            const extraZoomOut = mobile ? 2.5 : 1.0;
-            map.setMinZoom(fitZoom - extraZoomOut);
-
-            map.fitBounds(paddedBounds);
-            map.setMaxBounds(paddedBounds);
-
-            hideMapLoader();
-
-            // Once map is stable, render markers if already loaded
-            if (lotsAll.length) renderMarkers(lotsAll);
-
-            // Ensure correct sizing
-            setTimeout(() => map.invalidateSize(true), 0);
-        };
-
-        img.onerror = () => {
-            // If webp fails (older browser), fallback to PNG
-            // (Asegúrate de tener /assets/bugambilia-plan.png)
-            const fallbackUrl = mobile ? "/assets/bugambilia-plan.png" : "/assets/bugambilia-plan.png";
-            const overlay = L.imageOverlay(fallbackUrl, bounds).addTo(map);
-
-            const fitZoom = map.getBoundsZoom(paddedBounds, true);
-            const extraZoomOut = mobile ? 2.5 : 1.0;
-            map.setMinZoom(fitZoom - extraZoomOut);
-
-            map.fitBounds(paddedBounds);
-            map.setMaxBounds(paddedBounds);
-
-            hideMapLoader();
-            if (lotsAll.length) renderMarkers(lotsAll);
-            setTimeout(() => map.invalidateSize(true), 0);
-        };
-
-        // ---- Lots + UI ----
         let lotsAll = [];
-        let markerLayer = L.layerGroup().addTo(map);
+        const markerLayer = L.layerGroup().addTo(map);
+        const lotModal = new bootstrap.Modal(document.getElementById("lotModal"));
         let lastVersion = null;
 
         function isMobile() { return window.matchMedia("(max-width: 900px)").matches; }
@@ -514,30 +535,30 @@
         function pointRadius() {
             const z = map.getZoom();
             const base = isMobile() ? 12 : 9;
-            // fitZoom isn't in scope here; keep it simple by scaling mildly with zoom
-            return Math.max(base, base + (z * 0.6));
+            return Math.max(base, base + (z - fitZoom) * 1.2);
         }
 
         function openLotModal(lot) {
-            // Si ya tienes modal, aquí quedaría igual.
-            // En tu versión actual pública, abres modal de lote (no lo incluí para mantener esta página enfocada).
-            // Si lo necesitas, dime y lo re-integro tal cual estaba.
-            alert(`Lote: ${lot.displayCode}\nEstado: ${statusLabel(lot.status)}`);
+            document.getElementById("lotModalTitle").textContent = `Lote: ${lot.displayCode}`;
+            document.getElementById("m2Val").textContent = lot.areaM2 != null ? Number(lot.areaM2).toFixed(2) : "-";
+            document.getElementById("v2Val").textContent = lot.areaV2 != null ? Number(lot.areaV2).toFixed(2) : "-";
+            document.getElementById("statusDot").style.background = statusColor(lot);
+            document.getElementById("statusVal").textContent = statusLabel(lot.status);
+            lotModal.show();
         }
 
         function focusLot(lot) {
             if (lot.x != null && lot.y != null) {
-                map.setView(normToLatLng(lot), Math.max(map.getZoom(), 0), { animate: true });
+                map.setView(normToLatLng(lot), Math.max(map.getZoom(), fitZoom + 1), { animate: true });
             }
             if (isMobile()) document.getElementById("map").scrollIntoView({ behavior: "smooth", block: "start" });
         }
 
         function renderMarkers(lots) {
-            // If image isn't loaded yet, skip (we render again on img.onload)
+            // no markers before plano loaded
             if (mapLoading.style.display !== "none") return;
 
             markerLayer.clearLayers();
-
             for (const lot of lots) {
                 if (lot.x == null || lot.y == null) continue;
 
@@ -550,7 +571,7 @@
                 });
 
                 c.bindTooltip(lot.displayCode, { direction: "top", offset: [0, -10], opacity: 0.95 });
-                c.on("click", () => { focusLot(lot); /* openLotModal(lot); */ });
+                c.on("click", () => { focusLot(lot); openLotModal(lot); });
                 c.addTo(markerLayer);
             }
         }
@@ -567,12 +588,12 @@
                 item.style.background = "transparent";
                 item.style.color = "#e6edf3";
                 item.innerHTML = `
-                      <div class="d-flex justify-content-between">
-                        <div><span class="badge-dot" style="background:${statusColor(lot)}"></span><strong>${lot.displayCode}</strong></div>
-                        <div class="text-secondary small">${lot.areaM2 ?? ""} m²</div>
-                      </div>`;
+                  <div class="d-flex justify-content-between">
+                    <div><span class="badge-dot" style="background:${statusColor(lot)}"></span><strong>${lot.displayCode}</strong></div>
+                    <div class="text-secondary small">${lot.areaM2 ?? ""} m²</div>
+                  </div>`;
 
-                item.onclick = () => { focusLot(lot); /* openLotModal(lot); */ };
+                item.onclick = () => { focusLot(lot); openLotModal(lot); };
                 list.appendChild(item);
             }
         }
@@ -580,12 +601,35 @@
         async function loadLots() {
             const res = await fetch(`/api/projects/${projectKey}/lots`, { cache: "no-store" });
             lotsAll = await res.json();
-
             renderAvailableList(lotsAll);
             renderMarkers(lotsAll);
         }
 
-        // Tip close
+        // Load image first, then add overlay
+        function initOverlay(url) {
+            L.imageOverlay(url, bounds).addTo(map);
+
+            fitZoom = map.getBoundsZoom(paddedBounds, true);
+            const extraZoomOut = isMobile() ? 2.5 : 1.0;
+            map.setMinZoom(fitZoom - extraZoomOut);
+
+            map.fitBounds(paddedBounds);
+            map.setMaxBounds(paddedBounds);
+
+            hideMapLoader();
+
+            if (lotsAll.length) renderMarkers(lotsAll);
+            setTimeout(() => map.invalidateSize(true), 0);
+        }
+
+        const preload = new Image();
+        preload.decoding = "async";
+        preload.loading = "eager";
+        preload.src = imageUrl;
+
+        preload.onload = () => initOverlay(imageUrl);
+        preload.onerror = () => initOverlay(fallbackUrl);
+
         document.getElementById("tipCloseBtn").addEventListener("click", () => {
             document.getElementById("tipBar").style.display = "none";
             setTimeout(() => map.invalidateSize(true), 0);
@@ -594,18 +638,14 @@
         // Toggle list (mobile starts collapsed)
         const contentEl = document.getElementById("content");
         const toggleBtn = document.getElementById("toggleListBtn");
+        const isMobileFirstLoad = window.matchMedia("(max-width: 900px)").matches;
 
         function setToggleText(collapsed) {
-            if (mobile) {
-                toggleBtn.textContent = collapsed ? "Mostrar lista" : "Ocultar lista";
-            } else {
-                toggleBtn.textContent = collapsed
-                    ? "Mostrar Lista de lotes disponibles"
-                    : "Ocultar lista de lotes disponibles";
-            }
+            if (isMobileFirstLoad) toggleBtn.textContent = collapsed ? "Mostrar lista" : "Ocultar lista";
+            else toggleBtn.textContent = collapsed ? "Mostrar Lista de lotes disponibles" : "Ocultar lista de lotes disponibles";
         }
 
-        if (mobile) {
+        if (isMobileFirstLoad) {
             contentEl.classList.add("collapsed");
             setToggleText(true);
         } else {
@@ -627,7 +667,6 @@
             });
         });
 
-        // SSE
         function startSse() {
             const es = new EventSource("/api/updates/stream");
 
@@ -646,13 +685,8 @@
             };
         }
 
-        // Render markers on zoom end (lightweight)
         map.on("zoomend", () => renderMarkers(lotsAll));
-
-        window.addEventListener("resize", () => {
-            map.invalidateSize({ pan: false });
-            renderMarkers(lotsAll);
-        });
+        window.addEventListener("resize", () => { map.invalidateSize({ pan: false }); renderMarkers(lotsAll); });
 
         loadLots();
         startSse();
