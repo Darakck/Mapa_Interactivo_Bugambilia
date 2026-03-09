@@ -361,8 +361,7 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
-.gitignore
-v10
+
 # --- Deployment secrets (DO NOT COMMIT) ---
 .env
 .env.*
