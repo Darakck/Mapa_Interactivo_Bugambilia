@@ -18,6 +18,7 @@ services:
       ConnectionStrings__Default: Host=db;Port=5432;Database=${POSTGRES_DB};Username=${POSTGRES_USER};Password=${POSTGRES_PASSWORD}
       AdminAuth__Username: ${ADMIN_USER}
       AdminAuth__Password: ${ADMIN_PASSWORD}
+      AdminAuth__UnlockCode: ${ADMIN_UNLOCK_CODE}
     depends_on:
       - db
     restart: unless-stopped
