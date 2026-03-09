@@ -1,4 +1,15 @@
 services:
+  db:
+    image: postgres:16
+    container_name: bugambilia_db
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - bugambilia_db_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
   app:
     build: .
     container_name: bugambilia_app
